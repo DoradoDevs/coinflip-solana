@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(python setup_env.py:*)",
+      "Bash(python:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

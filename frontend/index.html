@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Coinflip - Provably Fair Gaming</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <h1>🎲 Solana Coinflip</h1>
+                <p class="tagline">Provably Fair • Instant Payouts • 2% Fee</p>
+            </div>
+            <div class="wallet-section">
+                <button id="connectWallet" class="btn btn-primary">
+                    Connect Wallet
+                </button>
+                <div id="walletInfo" class="wallet-info" style="display: none;">
+                    <span id="walletAddress" class="wallet-address"></span>
+                    <span id="walletBalance" class="wallet-balance"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Game Section -->
+        <main class="main-content">
+            <!-- Game Mode Selection -->
+            <section id="gameModeSection" class="game-mode-section">
+                <h2>Choose Game Mode</h2>
+                <div class="game-modes">
+                    <div class="game-mode-card" id="quickFlipMode">
+                        <div class="mode-icon">🎲</div>
+                        <h3>Quick Flip</h3>
+                        <p>Play instantly vs House</p>
+                        <p class="mode-detail">50/50 odds • Instant result</p>
+                    </div>
+                    <div class="game-mode-card" id="pvpMode">
+                        <div class="mode-icon">⚔️</div>
+                        <h3>PVP Wager</h3>
+                        <p>Challenge other players</p>
+                        <p class="mode-detail">Coming Soon!</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Flip Game -->
+            <section id="quickFlipSection" class="game-section" style="display: none;">
+                <button class="btn-back" id="backToModes">← Back</button>
+
+                <h2>🎲 Quick Flip vs House</h2>
+
+                <!-- Step 1: Choose Side -->
+                <div id="chooseSide" class="game-step">
+                    <h3>Choose Your Side</h3>
+                    <div class="coin-selection">
+                        <button class="coin-btn" data-side="heads">
+                            <div class="coin heads">
+                                <span class="coin-emoji">🪙</span>
+                            </div>
+                            <span>HEADS</span>
+                        </button>
+                        <button class="coin-btn" data-side="tails">
+                            <div class="coin tails">
+                                <span class="coin-emoji">🎯</span>
+                            </div>
+                            <span>TAILS</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Choose Amount -->
+                <div id="chooseAmount" class="game-step" style="display: none;">
+                    <h3>Choose Wager Amount</h3>
+                    <div class="amount-selection">
+                        <button class="amount-btn" data-amount="0.1">0.1 SOL</button>
+                        <button class="amount-btn" data-amount="0.5">0.5 SOL</button>
+                        <button class="amount-btn" data-amount="1.0">1.0 SOL</button>
+                        <button class="amount-btn" data-amount="5.0">5.0 SOL</button>
+                    </div>
+                    <div class="custom-amount">
+                        <input type="number" id="customAmount" placeholder="Custom amount" step="0.01" min="0.01">
+                        <button class="btn btn-secondary" id="useCustomAmount">Use Custom</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Confirm -->
+                <div id="confirmGame" class="game-step" style="display: none;">
+                    <h3>Confirm Your Flip</h3>
+                    <div class="game-summary">
+                        <div class="summary-item">
+                            <span class="label">Side:</span>
+                            <span id="selectedSide" class="value"></span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="label">Wager:</span>
+                            <span id="selectedAmount" class="value"></span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="label">Potential Win:</span>
+                            <span id="potentialWin" class="value highlight"></span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-large" id="playButton">
+                        🎲 Flip Coin
+                    </button>
+                </div>
+
+                <!-- Step 4: Flipping -->
+                <div id="flipping" class="game-step" style="display: none;">
+                    <h3>Flipping Coin...</h3>
+                    <div class="coin-flip-animation">
+                        <div class="coin flipping">
+                            <span class="coin-emoji">🪙</span>
+                        </div>
+                    </div>
+                    <p class="flip-text">Using Solana blockhash for fair randomness</p>
+                </div>
+
+                <!-- Step 5: Result -->
+                <div id="gameResult" class="game-step" style="display: none;">
+                    <div id="resultContent">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                    <div class="result-actions">
+                        <button class="btn btn-primary" id="playAgain">Play Again</button>
+                        <button class="btn btn-secondary" id="backToModesFromResult">Main Menu</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats Section -->
+            <section id="statsSection" class="stats-section">
+                <h2>Your Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Games Played</div>
+                        <div class="stat-value" id="gamesPlayed">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Win Rate</div>
+                        <div class="stat-value" id="winRate">0%</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Wagered</div>
+                        <div class="stat-value" id="totalWagered">0 SOL</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Net P/L</div>
+                        <div class="stat-value" id="netPL">0 SOL</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>🔒 Provably Fair • All results verifiable on Solana blockchain</p>
+            <p class="footer-links">
+                <a href="https://solana.com" target="_blank">Solana</a> •
+                <a href="#" id="showHelp">Help</a> •
+                <a href="#" id="showFairness">Fairness</a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Modal for Help/Info -->
+    <div id="modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <div id="modalBody">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/phantom.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

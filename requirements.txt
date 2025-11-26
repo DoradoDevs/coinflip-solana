@@ -1,0 +1,24 @@
+# Solana Coinflip - Python Dependencies
+
+# Telegram Bot
+python-telegram-bot==21.6
+
+# Solana
+solana==0.34.3
+solders==0.21.0
+base58==2.1.1
+
+# Web Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+websockets==14.1
+
+# Cryptography
+cryptography==44.0.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.3
+
+# Database
+# No extra dependencies for SQLite (built-in)

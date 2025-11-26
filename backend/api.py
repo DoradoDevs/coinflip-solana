@@ -1,0 +1,648 @@
+"""
+FastAPI web backend for Solana Coinflip game.
+Supports both custodial (like Telegram) and wallet connect modes.
+"""
+import os
+import logging
+from typing import List, Optional
+from datetime import datetime
+from dotenv import load_dotenv
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+# Import our modules
+from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus
+from game import (
+    play_house_game,
+    play_pvp_game,
+    generate_wallet,
+    get_sol_balance,
+    transfer_sol,
+    get_latest_blockhash,
+)
+from utils import (
+    encrypt_secret,
+    decrypt_secret,
+    format_sol,
+    format_win_rate,
+)
+from notifications import notify_wager_accepted
+
+# Load environment
+load_dotenv()
+
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Configuration
+RPC_URL = os.getenv("RPC_URL")
+HOUSE_WALLET_SECRET = os.getenv("HOUSE_WALLET_SECRET")
+TREASURY_WALLET = os.getenv("TREASURY_WALLET")
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+
+# Database
+db = Database()
+
+# FastAPI app
+app = FastAPI(title="Solana Coinflip API", version="1.0.0")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify your domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve frontend
+app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+
+
+# ===== MODELS =====
+
+class CreateUserRequest(BaseModel):
+    wallet_address: str
+
+
+class QuickFlipRequest(BaseModel):
+    wallet_address: str
+    side: str  # "heads" or "tails"
+    amount: float
+
+
+class CreateWagerRequest(BaseModel):
+    creator_wallet: str
+    side: str
+    amount: float
+
+
+class AcceptWagerRequest(BaseModel):
+    wager_id: str
+    acceptor_wallet: str
+
+
+class CancelWagerRequest(BaseModel):
+    wager_id: str
+    creator_wallet: str
+
+
+class UserResponse(BaseModel):
+    user_id: int
+    wallet_address: Optional[str]
+    games_played: int
+    games_won: int
+    total_wagered: float
+    total_won: float
+    total_lost: float
+    win_rate: str
+
+
+class GameResponse(BaseModel):
+    game_id: str
+    game_type: str
+    player1_wallet: str
+    player2_wallet: Optional[str]
+    amount: float
+    status: str
+    result: Optional[str]
+    winner_wallet: Optional[str]
+    blockhash: Optional[str]
+    created_at: str
+
+
+class WagerResponse(BaseModel):
+    wager_id: str
+    creator_wallet: str
+    creator_side: str
+    amount: float
+    status: str
+    created_at: str
+
+
+# ===== UTILITY FUNCTIONS =====
+
+def wallet_to_user_id(wallet_address: str) -> int:
+    """Convert wallet address to user ID (hash)."""
+    return abs(hash(wallet_address)) % (10 ** 10)
+
+
+def ensure_web_user(wallet_address: str) -> User:
+    """Ensure web user exists."""
+    user_id = wallet_to_user_id(wallet_address)
+    user = db.get_user(user_id)
+
+    if not user:
+        user = User(
+            user_id=user_id,
+            platform="web",
+            connected_wallet=wallet_address,
+        )
+        db.save_user(user)
+        logger.info(f"Created new web user for wallet {wallet_address}")
+
+    return user
+
+
+# ===== API ENDPOINTS =====
+
+@app.get("/")
+async def root():
+    """API root."""
+    return {
+        "name": "Solana Coinflip API",
+        "version": "1.0.0",
+        "status": "online"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+# === USER ENDPOINTS ===
+
+@app.post("/api/user/connect")
+async def connect_user(request: CreateUserRequest) -> UserResponse:
+    """Connect a web3 wallet."""
+    user = ensure_web_user(request.wallet_address)
+
+    return UserResponse(
+        user_id=user.user_id,
+        wallet_address=user.connected_wallet,
+        games_played=user.games_played,
+        games_won=user.games_won,
+        total_wagered=user.total_wagered,
+        total_won=user.total_won,
+        total_lost=user.total_lost,
+        win_rate=format_win_rate(user.games_played, user.games_won)
+    )
+
+
+@app.get("/api/user/{wallet_address}")
+async def get_user_stats(wallet_address: str) -> UserResponse:
+    """Get user statistics."""
+    user = ensure_web_user(wallet_address)
+
+    return UserResponse(
+        user_id=user.user_id,
+        wallet_address=user.connected_wallet,
+        games_played=user.games_played,
+        games_won=user.games_won,
+        total_wagered=user.total_wagered,
+        total_won=user.total_won,
+        total_lost=user.total_lost,
+        win_rate=format_win_rate(user.games_played, user.games_won)
+    )
+
+
+@app.get("/api/user/{wallet_address}/balance")
+async def get_balance(wallet_address: str):
+    """Get wallet SOL balance."""
+    try:
+        balance = await get_sol_balance(RPC_URL, wallet_address)
+        return {"wallet": wallet_address, "balance": balance}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === GAME ENDPOINTS ===
+
+@app.post("/api/game/quick-flip")
+async def quick_flip(request: QuickFlipRequest) -> GameResponse:
+    """Play quick flip vs house."""
+    try:
+        user = ensure_web_user(request.wallet_address)
+
+        # Validate side
+        if request.side not in ["heads", "tails"]:
+            raise HTTPException(status_code=400, detail="Invalid side. Must be 'heads' or 'tails'")
+
+        # Validate amount
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+        side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
+
+        # Decrypt house wallet
+        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
+
+        # Play game
+        game = await play_house_game(
+            RPC_URL,
+            house_secret,
+            TREASURY_WALLET,
+            user,
+            side,
+            request.amount
+        )
+
+        # Save game
+        db.save_game(game)
+
+        # Update user stats
+        user.games_played += 1
+        user.total_wagered += request.amount
+
+        won = (game.winner_id == user.user_id)
+        if won:
+            user.games_won += 1
+            payout = (request.amount * 2) * 0.98
+            user.total_won += payout
+        else:
+            user.total_lost += request.amount
+
+        db.save_user(user)
+
+        # Return game result
+        winner_wallet = None
+        if game.winner_id == user.user_id:
+            winner_wallet = user.connected_wallet
+        elif game.winner_id == 0:
+            winner_wallet = "house"
+
+        return GameResponse(
+            game_id=game.game_id,
+            game_type=game.game_type.value,
+            player1_wallet=game.player1_wallet,
+            player2_wallet=game.player2_wallet,
+            amount=game.amount,
+            status=game.status.value,
+            result=game.result.value if game.result else None,
+            winner_wallet=winner_wallet,
+            blockhash=game.blockhash,
+            created_at=game.created_at.isoformat()
+        )
+
+    except Exception as e:
+        logger.error(f"Quick flip failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/game/{game_id}")
+async def get_game(game_id: str) -> GameResponse:
+    """Get game details."""
+    game = db.get_game(game_id)
+
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    winner_wallet = None
+    if game.winner_id:
+        winner_user = db.get_user(game.winner_id)
+        if winner_user:
+            winner_wallet = winner_user.connected_wallet or winner_user.wallet_address
+
+    return GameResponse(
+        game_id=game.game_id,
+        game_type=game.game_type.value,
+        player1_wallet=game.player1_wallet,
+        player2_wallet=game.player2_wallet,
+        amount=game.amount,
+        status=game.status.value,
+        result=game.result.value if game.result else None,
+        winner_wallet=winner_wallet,
+        blockhash=game.blockhash,
+        created_at=game.created_at.isoformat()
+    )
+
+
+@app.get("/api/game/verify/{game_id}")
+async def verify_game(game_id: str):
+    """Verify game fairness."""
+    from game.coinflip import verify_game_result
+
+    game = db.get_game(game_id)
+
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    is_fair = verify_game_result(game)
+
+    return {
+        "game_id": game_id,
+        "blockhash": game.blockhash,
+        "result": game.result.value if game.result else None,
+        "is_fair": is_fair,
+        "message": "Game result is provably fair!" if is_fair else "Game result verification failed!"
+    }
+
+
+@app.get("/api/games/recent")
+async def get_recent_games(limit: int = 10) -> List[GameResponse]:
+    """Get recent games (all users)."""
+    # This would require a new DB method - simplified for now
+    return []
+
+
+# === WAGER ENDPOINTS (PVP) ===
+
+@app.post("/api/wager/create")
+async def create_wager(request: CreateWagerRequest) -> WagerResponse:
+    """Create a PVP wager."""
+    try:
+        import uuid
+
+        user = ensure_web_user(request.creator_wallet)
+
+        # Validate side
+        if request.side not in ["heads", "tails"]:
+            raise HTTPException(status_code=400, detail="Invalid side. Must be 'heads' or 'tails'")
+
+        # Validate amount
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+        # Check balance
+        balance = await get_sol_balance(RPC_URL, request.creator_wallet)
+        if balance < request.amount:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+
+        side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
+
+        # Create wager
+        wager_id = f"wager_{uuid.uuid4().hex[:12]}"
+        wager = Wager(
+            wager_id=wager_id,
+            creator_id=user.user_id,
+            creator_wallet=request.creator_wallet,
+            creator_side=side,
+            amount=request.amount,
+            status="open",
+        )
+
+        # Save to database
+        db.save_wager(wager)
+
+        logger.info(f"Web wager created: {wager_id} by {request.creator_wallet} - {request.amount} SOL on {side.value}")
+
+        # Broadcast to WebSocket clients
+        await manager.broadcast({
+            "type": "wager_created",
+            "wager": {
+                "wager_id": wager_id,
+                "creator_wallet": request.creator_wallet,
+                "side": side.value,
+                "amount": request.amount
+            }
+        })
+
+        return WagerResponse(
+            wager_id=wager.wager_id,
+            creator_wallet=wager.creator_wallet,
+            creator_side=wager.creator_side.value,
+            amount=wager.amount,
+            status=wager.status,
+            created_at=wager.created_at.isoformat()
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create wager failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/wagers/open")
+async def get_open_wagers() -> List[WagerResponse]:
+    """Get all open wagers from both Telegram and Web users."""
+    wagers = db.get_open_wagers(limit=20)
+
+    return [
+        WagerResponse(
+            wager_id=w.wager_id,
+            creator_wallet=w.creator_wallet,
+            creator_side=w.creator_side.value,
+            amount=w.amount,
+            status=w.status,
+            created_at=w.created_at.isoformat()
+        )
+        for w in wagers
+    ]
+
+
+@app.post("/api/wager/accept")
+async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
+    """Accept a PVP wager."""
+    try:
+        user = ensure_web_user(request.acceptor_wallet)
+
+        # Get wager
+        wagers = db.get_open_wagers(limit=100)
+        wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
+
+        if not wager or wager.status != "open":
+            raise HTTPException(status_code=404, detail="Wager not found or no longer available")
+
+        # Can't accept own wager
+        if wager.creator_wallet == request.acceptor_wallet:
+            raise HTTPException(status_code=400, detail="Cannot accept your own wager")
+
+        # Check balance
+        balance = await get_sol_balance(RPC_URL, request.acceptor_wallet)
+        if balance < wager.amount:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+
+        # Get creator
+        creator = db.get_user(wager.creator_id)
+        if not creator:
+            raise HTTPException(status_code=404, detail="Wager creator not found")
+
+        # Update wager status
+        wager.status = "accepted"
+        wager.acceptor_id = user.user_id
+
+        # Decrypt house wallet for custodial transactions
+        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
+
+        # Play PVP game
+        game = await play_pvp_game(
+            RPC_URL,
+            house_secret,
+            TREASURY_WALLET,
+            creator,
+            wager.creator_side,
+            user,
+            wager.amount
+        )
+
+        # Link game to wager
+        wager.game_id = game.game_id
+        db.save_wager(wager)
+
+        # Save game
+        db.save_game(game)
+
+        # Update both players' stats
+        creator.games_played += 1
+        creator.total_wagered += wager.amount
+        user.games_played += 1
+        user.total_wagered += wager.amount
+
+        won = (game.winner_id == user.user_id)
+        payout = (wager.amount * 2) * 0.98
+
+        if won:
+            user.games_won += 1
+            user.total_won += payout
+            creator.total_lost += wager.amount
+        else:
+            creator.games_won += 1
+            creator.total_won += payout
+            user.total_lost += wager.amount
+
+        db.save_user(creator)
+        db.save_user(user)
+
+        logger.info(f"Web user {request.acceptor_wallet} accepted wager {request.wager_id}")
+
+        # Notify creator if they're a Telegram user (cross-platform notification)
+        if creator.platform == "telegram":
+            creator_won = (game.winner_id == creator.user_id)
+            await notify_wager_accepted(
+                creator.user_id,
+                wager.amount,
+                creator_won,
+                payout
+            )
+
+        # Broadcast to WebSocket clients
+        await manager.broadcast({
+            "type": "wager_accepted",
+            "wager_id": request.wager_id,
+            "game_id": game.game_id,
+            "winner": game.winner_id
+        })
+
+        # Return game result
+        winner_wallet = None
+        if game.winner_id == user.user_id:
+            winner_wallet = user.connected_wallet
+        elif game.winner_id == creator.user_id:
+            winner_wallet = creator.connected_wallet or creator.wallet_address
+
+        return GameResponse(
+            game_id=game.game_id,
+            game_type=game.game_type.value,
+            player1_wallet=game.player1_wallet,
+            player2_wallet=game.player2_wallet,
+            amount=game.amount,
+            status=game.status.value,
+            result=game.result.value if game.result else None,
+            winner_wallet=winner_wallet,
+            blockhash=game.blockhash,
+            created_at=game.created_at.isoformat()
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Accept wager failed: {e}")
+        # Revert wager status on error
+        if 'wager' in locals():
+            wager.status = "open"
+            wager.acceptor_id = None
+            db.save_wager(wager)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/wager/cancel")
+async def cancel_wager_endpoint(request: CancelWagerRequest):
+    """Cancel a wager (only creator can cancel)."""
+    try:
+        user = ensure_web_user(request.creator_wallet)
+
+        # Get wager
+        wagers = db.get_open_wagers(limit=100)
+        wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
+
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
+
+        # Only creator can cancel
+        if wager.creator_wallet != request.creator_wallet:
+            raise HTTPException(status_code=403, detail="Only the creator can cancel this wager")
+
+        # Can only cancel open wagers
+        if wager.status != "open":
+            raise HTTPException(status_code=400, detail="Can only cancel open wagers")
+
+        # Cancel wager
+        wager.status = "cancelled"
+        db.save_wager(wager)
+
+        logger.info(f"Web user {request.creator_wallet} cancelled wager {request.wager_id}")
+
+        # Broadcast to WebSocket clients
+        await manager.broadcast({
+            "type": "wager_cancelled",
+            "wager_id": request.wager_id
+        })
+
+        return {
+            "success": True,
+            "message": "Wager cancelled successfully",
+            "wager_id": request.wager_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cancel wager failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === WEBSOCKET FOR LIVE UPDATES ===
+
+class ConnectionManager:
+    """Manage WebSocket connections."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket for live game updates."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+# ===== MAIN =====
+
+if __name__ == "__main__":
+    import uvicorn
+
+    logger.info("="*50)
+    logger.info("Solana Coinflip API Starting...")
+    logger.info("="*50)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
