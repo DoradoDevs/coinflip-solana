@@ -98,6 +98,16 @@ class Wager:
     amount: float
     status: str = "open"  # open, accepted, cancelled
 
+    # Unique escrow wallets (SECURITY: Isolated per wager)
+    creator_escrow_address: Optional[str] = None  # Unique wallet for creator's deposit
+    creator_escrow_secret: Optional[str] = None   # Encrypted secret key
+    acceptor_escrow_address: Optional[str] = None  # Unique wallet for acceptor's deposit
+    acceptor_escrow_secret: Optional[str] = None   # Encrypted secret key
+
+    # Transaction tracking (SECURITY: Prevent signature reuse)
+    creator_deposit_tx: Optional[str] = None  # Signature of creator's deposit
+    acceptor_deposit_tx: Optional[str] = None  # Signature of acceptor's deposit
+
     # When accepted
     acceptor_id: Optional[int] = None
     game_id: Optional[str] = None
@@ -117,3 +127,16 @@ class Transaction:
 
     game_id: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class UsedSignature:
+    """Track used transaction signatures to prevent reuse attacks.
+
+    SECURITY: Prevents users from reusing the same deposit transaction
+    for multiple games/wagers.
+    """
+    signature: str  # Transaction signature (unique)
+    user_wallet: str  # User who used this signature
+    used_for: str  # What it was used for (e.g., "wager_abc123", "game_xyz456")
+    used_at: datetime = field(default_factory=datetime.utcnow)

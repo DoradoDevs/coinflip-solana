@@ -173,3 +173,97 @@ async def collect_fee(
         Fee transaction signature
     """
     return await transfer_sol(rpc_url, from_secret, treasury_address, amount_sol)
+
+
+async def verify_deposit_transaction(
+    rpc_url: str,
+    transaction_signature: str,
+    expected_sender: str,
+    expected_recipient: str,
+    expected_amount: float,
+    tolerance: float = 0.0001  # Allow small tolerance for rounding
+) -> bool:
+    """Verify a deposit transaction on-chain.
+
+    Args:
+        rpc_url: Solana RPC URL
+        transaction_signature: Transaction signature to verify
+        expected_sender: Expected sender wallet address
+        expected_recipient: Expected recipient wallet address (house wallet)
+        expected_amount: Expected amount in SOL
+        tolerance: Tolerance for amount matching (default 0.0001 SOL)
+
+    Returns:
+        True if transaction is valid, False otherwise
+    """
+    try:
+        from solders.signature import Signature
+
+        async with AsyncClient(rpc_url) as client:
+            # Parse signature
+            sig = Signature.from_string(transaction_signature)
+
+            # Get transaction details
+            tx_resp = await client.get_transaction(
+                sig,
+                encoding="jsonParsed",
+                commitment=Confirmed,
+                max_supported_transaction_version=0
+            )
+
+            if not tx_resp.value:
+                logger.warning(f"Transaction not found: {transaction_signature}")
+                return False
+
+            tx = tx_resp.value
+
+            # Check if transaction was successful
+            if tx.transaction.meta.err is not None:
+                logger.warning(f"Transaction failed: {transaction_signature}")
+                return False
+
+            # Parse transaction to find transfer instruction
+            # Structure: tx.transaction.transaction.message.instructions
+            instructions = tx.transaction.transaction.message.instructions
+
+            # Look for system program transfer instruction
+            found_transfer = False
+            for ix in instructions:
+                # Check if this is a parsed instruction
+                if hasattr(ix, 'parsed') and ix.parsed:
+                    parsed = ix.parsed
+
+                    # Check if it's a transfer instruction
+                    if parsed.get('type') == 'transfer':
+                        info = parsed.get('info', {})
+
+                        # Verify sender
+                        sender = info.get('source')
+                        if sender != expected_sender:
+                            logger.warning(f"Sender mismatch: expected {expected_sender}, got {sender}")
+                            continue
+
+                        # Verify recipient
+                        recipient = info.get('destination')
+                        if recipient != expected_recipient:
+                            logger.warning(f"Recipient mismatch: expected {expected_recipient}, got {recipient}")
+                            continue
+
+                        # Verify amount
+                        lamports = info.get('lamports', 0)
+                        actual_amount = lamports / LAMPORTS_PER_SOL
+
+                        if abs(actual_amount - expected_amount) > tolerance:
+                            logger.warning(f"Amount mismatch: expected {expected_amount}, got {actual_amount}")
+                            continue
+
+                        # All checks passed
+                        found_transfer = True
+                        logger.info(f"Verified deposit: {actual_amount} SOL from {sender} to {recipient}")
+                        break
+
+            return found_transfer
+
+    except Exception as e:
+        logger.error(f"Error verifying transaction {transaction_signature}: {e}")
+        return False

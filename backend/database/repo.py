@@ -68,7 +68,7 @@ class Database:
             )
         """)
 
-        # Wagers table
+        # Wagers table (with isolated escrow wallets for security)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS wagers (
                 wager_id TEXT PRIMARY KEY,
@@ -77,7 +77,13 @@ class Database:
                 creator_side TEXT NOT NULL,
                 amount REAL NOT NULL,
                 status TEXT DEFAULT 'open',
+                creator_escrow_address TEXT,
+                creator_escrow_secret TEXT,
+                creator_deposit_tx TEXT,
                 acceptor_id INTEGER,
+                acceptor_escrow_address TEXT,
+                acceptor_escrow_secret TEXT,
+                acceptor_deposit_tx TEXT,
                 game_id TEXT,
                 created_at TEXT,
                 expires_at TEXT,
@@ -101,6 +107,16 @@ class Database:
             )
         """)
 
+        # Used signatures table (SECURITY: Prevent signature reuse)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS used_signatures (
+                signature TEXT PRIMARY KEY,
+                user_wallet TEXT NOT NULL,
+                used_for TEXT NOT NULL,
+                used_at TEXT NOT NULL
+            )
+        """)
+
         # Indexes for performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_player1 ON games(player1_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_player2 ON games(player2_id)")
@@ -108,6 +124,7 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_wagers_status ON wagers(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_wagers_creator ON wagers(creator_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_used_signatures_wallet ON used_signatures(user_wallet)")
 
         conn.commit()
         conn.close()
@@ -259,12 +276,17 @@ class Database:
         cursor.execute("""
             INSERT OR REPLACE INTO wagers (
                 wager_id, creator_id, creator_wallet, creator_side, amount,
-                status, acceptor_id, game_id, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                status, creator_escrow_address, creator_escrow_secret, creator_deposit_tx,
+                acceptor_id, acceptor_escrow_address, acceptor_escrow_secret, acceptor_deposit_tx,
+                game_id, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             wager.wager_id, wager.creator_id, wager.creator_wallet,
             wager.creator_side.value, wager.amount, wager.status,
-            wager.acceptor_id, wager.game_id,
+            wager.creator_escrow_address, wager.creator_escrow_secret, wager.creator_deposit_tx,
+            wager.acceptor_id,
+            wager.acceptor_escrow_address, wager.acceptor_escrow_secret, wager.acceptor_deposit_tx,
+            wager.game_id,
             wager.created_at.isoformat(),
             wager.expires_at.isoformat() if wager.expires_at else None
         ))
@@ -316,7 +338,13 @@ class Database:
             creator_side=CoinSide(row["creator_side"]),
             amount=row["amount"],
             status=row["status"],
+            creator_escrow_address=row["creator_escrow_address"],
+            creator_escrow_secret=row["creator_escrow_secret"],
+            creator_deposit_tx=row["creator_deposit_tx"],
             acceptor_id=row["acceptor_id"],
+            acceptor_escrow_address=row["acceptor_escrow_address"],
+            acceptor_escrow_secret=row["acceptor_escrow_secret"],
+            acceptor_deposit_tx=row["acceptor_deposit_tx"],
             game_id=row["game_id"],
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow(),
             expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
@@ -369,4 +397,61 @@ class Database:
             signature=row["signature"],
             game_id=row["game_id"],
             timestamp=datetime.fromisoformat(row["timestamp"]) if row["timestamp"] else datetime.utcnow(),
+        )
+
+    # === Used Signature Operations (SECURITY) ===
+
+    def save_used_signature(self, sig: 'UsedSignature'):
+        """Mark a transaction signature as used (prevent reuse attacks)."""
+        from .models import UsedSignature
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR IGNORE INTO used_signatures (
+                signature, user_wallet, used_for, used_at
+            ) VALUES (?, ?, ?, ?)
+        """, (
+            sig.signature, sig.user_wallet, sig.used_for, sig.used_at.isoformat()
+        ))
+
+        conn.commit()
+        conn.close()
+
+    def signature_already_used(self, signature: str) -> bool:
+        """Check if a transaction signature has already been used."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT signature FROM used_signatures WHERE signature = ?
+        """, (signature,))
+
+        result = cursor.fetchone()
+        conn.close()
+
+        return result is not None
+
+    def get_used_signature(self, signature: str) -> Optional['UsedSignature']:
+        """Get used signature details."""
+        from .models import UsedSignature
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM used_signatures WHERE signature = ?
+        """, (signature,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return UsedSignature(
+            signature=row["signature"],
+            user_wallet=row["user_wallet"],
+            used_for=row["used_for"],
+            used_at=datetime.fromisoformat(row["used_at"]) if row["used_at"] else datetime.utcnow(),
         )

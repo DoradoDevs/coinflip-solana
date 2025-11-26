@@ -337,6 +337,12 @@ games = db.get_user_games(user_id, limit=10)
 - User manages private keys
 - No server-side secrets
 
+**Escrow Enforcement:**
+- User sends SOL to house wallet from Phantom/Solflare
+- Transaction signature verified on-chain before game
+- No way to bypass verification
+- Full transparency (all txs visible on blockchain)
+
 **Risks:**
 - Phishing attacks
 - Malicious frontends
@@ -411,8 +417,10 @@ games = db.get_user_games(user_id, limit=10)
 ✅ **Platform-specific notifications**
 ✅ **Consistent game logic**
 ✅ **Secure wallet handling**
+✅ **Escrow enforcement on both platforms**
+✅ **Real mainnet transactions verified on-chain**
 
-Users on Telegram and Web can **seamlessly play together** with real-time notifications and updates!
+Users on Telegram and Web can **seamlessly play together** with real-time notifications, updates, and fully enforced escrow!
 
 ---
 

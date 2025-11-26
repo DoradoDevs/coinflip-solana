@@ -24,9 +24,16 @@ from database import Database, User, GameType, CoinSide, Wager
 from game import (
     play_house_game,
     play_pvp_game,
+    play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
     transfer_sol,
+    TRANSACTION_FEE,
+    create_escrow_wallet,
+    payout_from_escrow,
+    collect_fees_from_escrow,
+    refund_from_escrow,
+    check_escrow_balance,
 )
 from utils import (
     encrypt_secret,
@@ -561,31 +568,59 @@ async def create_wager_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Execute create wager."""
+    """Execute create wager with isolated escrow wallet.
+
+    SECURITY: Creates unique escrow wallet and collects deposit before marking wager as open.
+    """
     user = await ensure_user(update)
     session = get_session(user.user_id)
 
     side = CoinSide(session.get("side", "heads"))
     amount = session.get("amount", 0.1)
 
-    # Check balance
+    # Check balance (wager + transaction fee)
+    total_required = amount + TRANSACTION_FEE
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
-    if balance < amount:
+    if balance < total_required:
         await update.callback_query.edit_message_text(
-            "❌ *Insufficient Balance*\n\nPlease deposit SOL first.",
+            f"❌ *Insufficient Balance*\n\n"
+            f"Required: *{format_sol(total_required)} SOL*\n"
+            f"({format_sol(amount)} wager + {format_sol(TRANSACTION_FEE)} fee)\n\n"
+            f"Available: *{format_sol(balance)} SOL*\n\n"
+            f"Please deposit more SOL first.",
             parse_mode="Markdown",
             reply_markup=menus.main_menu()
         )
         return
 
     await update.callback_query.edit_message_text(
-        "⚔️ *Creating wager...*\n\nPlease wait...",
+        "⚔️ *Creating wager...*\n\n"
+        "🔒 Generating secure escrow wallet...\n"
+        "💸 Collecting deposit...\n\n"
+        "Please wait...",
         parse_mode="Markdown"
     )
 
     try:
-        # Create wager
+        # Generate wager ID
         wager_id = f"wager_{uuid.uuid4().hex[:12]}"
+
+        # SECURITY: Create unique escrow wallet and collect deposit
+        escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
+            RPC_URL,
+            ENCRYPTION_KEY,
+            amount,
+            TRANSACTION_FEE,
+            user,
+            user.wallet_address,
+            None,  # Telegram users don't provide signature (custodial)
+            wager_id,
+            db
+        )
+
+        logger.info(f"[ESCROW] Created wager {wager_id} with escrow {escrow_address}")
+
+        # Create wager with escrow details
         wager = Wager(
             wager_id=wager_id,
             creator_id=user.user_id,
@@ -593,22 +628,28 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
             creator_side=side,
             amount=amount,
             status="open",
+            creator_escrow_address=escrow_address,
+            creator_escrow_secret=encrypted_secret,
+            creator_deposit_tx=deposit_tx,
         )
 
         # Save to database
         db.save_wager(wager)
 
-        logger.info(f"Wager created: {wager_id} by user {user.user_id} - {amount} SOL on {side.value}")
+        logger.info(f"Wager created: {wager_id} by user {user.user_id} - {amount} SOL on {side.value} (escrow: {escrow_address})")
 
         # Show success message
         side_emoji = "🪙" if side == CoinSide.HEADS else "🎯"
         msg = (
             f"✅ *Wager Created!*\n\n"
             f"{side_emoji} Side: *{side.value.upper()}*\n"
-            f"💰 Amount: *{format_sol(amount)} SOL*\n\n"
+            f"💰 Amount: *{format_sol(amount)} SOL*\n"
+            f"💳 Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
+            f"🔒 Funds secured in escrow: `{truncate_address(escrow_address)}`\n\n"
             f"Your wager is now live!\n"
             f"Other players can accept it from the Open Wagers list.\n\n"
-            f"You can view it in 'My Wagers' or cancel it anytime."
+            f"You can view it in 'My Wagers' or cancel it anytime.\n"
+            f"(Cancellation refunds wager, keeps fee)"
         )
 
         keyboard = [

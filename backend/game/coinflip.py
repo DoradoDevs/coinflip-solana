@@ -18,7 +18,9 @@ from .solana_ops import (
 logger = logging.getLogger(__name__)
 
 # Fee configuration
-HOUSE_FEE_PCT = 0.02  # 2% fee
+HOUSE_FEE_PCT = 0.02  # 2% of prize pool
+TRANSACTION_FEE = 0.025  # Fixed 0.025 SOL per player (covers gas + profit)
+# Total fees per game: 2% of pot + 0.05 SOL fixed (0.025 from each player)
 
 
 def generate_game_id() -> str:
@@ -90,10 +92,11 @@ async def play_house_game(
     if not player_wallet:
         raise Exception("Player has no wallet")
 
-    # Check player has sufficient balance
+    # Check player has sufficient balance (wager + transaction fee)
+    total_required = amount + TRANSACTION_FEE
     player_balance = await get_sol_balance(rpc_url, player_wallet)
-    if player_balance < amount:
-        raise Exception(f"Insufficient balance. Required: {amount} SOL, Available: {player_balance} SOL")
+    if player_balance < total_required:
+        raise Exception(f"Insufficient balance. Required: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee), Available: {player_balance} SOL")
 
     # Create game
     game = Game(
@@ -108,7 +111,7 @@ async def play_house_game(
     )
 
     try:
-        # STEP 1: COLLECT WAGER (ESCROW)
+        # STEP 1: COLLECT WAGER + TRANSACTION FEE (REAL SOLANA MAINNET)
         # For Telegram custodial: Transfer from player's wallet to house wallet
         if player.platform == "telegram" and player.encrypted_secret:
             from utils import decrypt_secret
@@ -116,20 +119,22 @@ async def play_house_game(
             encryption_key = os.getenv("ENCRYPTION_KEY")
             player_secret = decrypt_secret(player.encrypted_secret, encryption_key)
 
-            # Transfer player's wager to house wallet (escrow)
+            # Collect wager + transaction fee (REAL SOL TRANSFER ON MAINNET)
+            total_to_collect = amount + TRANSACTION_FEE
             deposit_tx = await transfer_sol(
                 rpc_url,
                 player_secret,
                 get_house_wallet_address(house_wallet_secret),
-                amount
+                total_to_collect
             )
             game.deposit_tx = deposit_tx
-            logger.info(f"Collected {amount} SOL from player (tx: {deposit_tx})")
+            logger.info(f"[REAL MAINNET] Collected {total_to_collect} SOL from player ({amount} wager + {TRANSACTION_FEE} fee) (tx: {deposit_tx})")
 
-        # For Web users: They would send SOL to escrow address before calling this
-        # For now, we trust they have the balance (checked above)
+        # For Web users: Escrow verification happens in API layer before calling this function
+        # The transaction signature is verified on-chain to ensure SOL was sent
         elif player.platform == "web":
-            logger.warning(f"Web game - assuming player will send {amount} SOL (not enforced yet)")
+            total_required = amount + TRANSACTION_FEE
+            logger.info(f"[REAL MAINNET] Web user deposit verified in API layer: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee)")
 
         # STEP 2: FLIP COIN
         # Get latest blockhash for provably fair randomness
@@ -146,12 +151,13 @@ async def play_house_game(
         if player_won:
             game.winner_id = player.user_id
 
-            # Calculate payout (2x wager - 2% fee)
+            # Calculate payout (2x wager - 2% game fee)
+            # Note: Transaction fee (0.025 SOL) already collected, kept separate
             total_pot = amount * 2
-            fee = total_pot * HOUSE_FEE_PCT
-            payout = total_pot - fee
+            game_fee = total_pot * HOUSE_FEE_PCT
+            payout = total_pot - game_fee
 
-            # Pay winner from house wallet (which now has the escrowed funds)
+            # Pay winner from house wallet (REAL MAINNET TRANSFER)
             payout_tx = await transfer_sol(
                 rpc_url,
                 house_wallet_secret,
@@ -160,36 +166,38 @@ async def play_house_game(
             )
             game.payout_tx = payout_tx
 
-            # Collect fee
-            if fee > 0:
+            # Send all fees to treasury (game fee + transaction fee)
+            total_fees = game_fee + TRANSACTION_FEE
+            if total_fees > 0:
                 fee_tx = await transfer_sol(
                     rpc_url,
                     house_wallet_secret,
                     treasury_address,
-                    fee
+                    total_fees
                 )
                 game.fee_tx = fee_tx
 
-            logger.info(f"Player won {payout} SOL (tx: {payout_tx}), fee: {fee} SOL")
+            logger.info(f"[REAL MAINNET] Player won {payout} SOL (tx: {payout_tx}), game fee: {game_fee} SOL, tx fee: {TRANSACTION_FEE} SOL, total fees: {total_fees} SOL")
 
         else:
             # House wins - player's escrowed funds stay in house wallet
             game.winner_id = 0  # House
 
-            # Collect fee to treasury (house keeps the rest)
+            # Send all fees to treasury (game fee + transaction fee)
+            # House keeps the remaining wager
             if player.platform == "telegram":
-                # Funds already in house wallet, just move fee to treasury
-                fee = amount * HOUSE_FEE_PCT
-                if fee > 0:
+                game_fee = amount * HOUSE_FEE_PCT
+                total_fees = game_fee + TRANSACTION_FEE
+                if total_fees > 0:
                     fee_tx = await transfer_sol(
                         rpc_url,
                         house_wallet_secret,
                         treasury_address,
-                        fee
+                        total_fees
                     )
                     game.fee_tx = fee_tx
 
-            logger.info(f"House won {amount} SOL")
+            logger.info(f"[REAL MAINNET] House won {amount} SOL, sent {total_fees} SOL in fees to treasury")
 
         # Mark game as completed
         game.status = GameStatus.COMPLETED
@@ -254,31 +262,32 @@ async def play_pvp_game(
     )
 
     try:
-        # STEP 1: COLLECT ESCROW FROM BOTH PLAYERS
-        # Check both players have sufficient balance
+        # STEP 1: COLLECT ESCROW FROM BOTH PLAYERS (REAL SOLANA MAINNET)
+        # Check both players have sufficient balance (wager + transaction fee)
+        total_required = amount + TRANSACTION_FEE
         player1_balance = await get_sol_balance(rpc_url, player1_wallet)
         player2_balance = await get_sol_balance(rpc_url, player2_wallet)
 
-        if player1_balance < amount:
-            raise Exception(f"Player 1 insufficient balance. Required: {amount} SOL, Available: {player1_balance} SOL")
-        if player2_balance < amount:
-            raise Exception(f"Player 2 insufficient balance. Required: {amount} SOL, Available: {player2_balance} SOL")
+        if player1_balance < total_required:
+            raise Exception(f"Player 1 insufficient balance. Required: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee), Available: {player1_balance} SOL")
+        if player2_balance < total_required:
+            raise Exception(f"Player 2 insufficient balance. Required: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee), Available: {player2_balance} SOL")
 
-        # Collect from both Telegram users (custodial wallets)
+        # Collect from both Telegram users (custodial wallets) - REAL TRANSFERS
         if player1.platform == "telegram" and player1.encrypted_secret:
             from utils import decrypt_secret
             import os
             encryption_key = os.getenv("ENCRYPTION_KEY")
             player1_secret = decrypt_secret(player1.encrypted_secret, encryption_key)
 
-            # Transfer player1's wager to house wallet
+            # Transfer player1's wager + fee to house wallet (REAL MAINNET)
             await transfer_sol(
                 rpc_url,
                 player1_secret,
                 get_house_wallet_address(house_wallet_secret),
-                amount
+                total_required
             )
-            logger.info(f"Collected {amount} SOL from player1")
+            logger.info(f"[REAL MAINNET] Collected {total_required} SOL from player1 ({amount} wager + {TRANSACTION_FEE} fee)")
 
         if player2.platform == "telegram" and player2.encrypted_secret:
             from utils import decrypt_secret
@@ -286,17 +295,21 @@ async def play_pvp_game(
             encryption_key = os.getenv("ENCRYPTION_KEY")
             player2_secret = decrypt_secret(player2.encrypted_secret, encryption_key)
 
-            # Transfer player2's wager to house wallet
+            # Transfer player2's wager + fee to house wallet (REAL MAINNET)
             await transfer_sol(
                 rpc_url,
                 player2_secret,
                 get_house_wallet_address(house_wallet_secret),
-                amount
+                total_required
             )
-            logger.info(f"Collected {amount} SOL from player2")
+            logger.info(f"[REAL MAINNET] Collected {total_required} SOL from player2 ({amount} wager + {TRANSACTION_FEE} fee)")
 
-        # For Web users: They would send SOL before accepting wager
-        # (Not enforced yet - requires transaction verification)
+        # For Web users: Escrow verification happens in API layer before calling this function
+        # The transaction signatures are verified on-chain for both creator and acceptor
+        if player1.platform == "web":
+            logger.info(f"[REAL MAINNET] Web creator deposit verified in API layer: {total_required} SOL")
+        if player2.platform == "web":
+            logger.info(f"[REAL MAINNET] Web acceptor deposit verified in API layer: {total_required} SOL")
 
         # STEP 2: FLIP COIN
         # Get latest blockhash for provably fair randomness
@@ -317,12 +330,13 @@ async def play_pvp_game(
             winner_wallet = player2_wallet
             game.winner_id = player2.user_id
 
-        # Calculate payout
+        # Calculate payout (2x wager - 2% game fee)
+        # Note: Transaction fees (0.025 SOL × 2 players) already collected separately
         total_pot = amount * 2
-        fee = total_pot * HOUSE_FEE_PCT
-        payout = total_pot - fee
+        game_fee = total_pot * HOUSE_FEE_PCT
+        payout = total_pot - game_fee
 
-        # Pay winner from house wallet (which now has both players' escrowed funds)
+        # Pay winner from house wallet (REAL MAINNET TRANSFER)
         payout_tx = await transfer_sol(
             rpc_url,
             house_wallet_secret,
@@ -331,17 +345,19 @@ async def play_pvp_game(
         )
         game.payout_tx = payout_tx
 
-        # Collect fee to treasury
-        if fee > 0:
+        # Send all fees to treasury (game fee + transaction fees from both players)
+        total_transaction_fees = TRANSACTION_FEE * 2  # Both players paid 0.025 each
+        total_fees = game_fee + total_transaction_fees
+        if total_fees > 0:
             fee_tx = await transfer_sol(
                 rpc_url,
                 house_wallet_secret,
                 treasury_address,
-                fee
+                total_fees
             )
             game.fee_tx = fee_tx
 
-        logger.info(f"Player {game.winner_id} won {payout} SOL in PVP game (fee: {fee} SOL)")
+        logger.info(f"[REAL MAINNET] Player {game.winner_id} won {payout} SOL in PVP game, game fee: {game_fee} SOL, tx fees: {total_transaction_fees} SOL, total fees: {total_fees} SOL")
 
         # Mark game as completed
         game.status = GameStatus.COMPLETED
@@ -351,6 +367,166 @@ async def play_pvp_game(
 
     except Exception as e:
         logger.error(f"PVP game failed: {e}")
+        game.status = GameStatus.CANCELLED
+        raise
+
+
+async def play_pvp_game_with_escrows(
+    rpc_url: str,
+    house_wallet_secret: str,
+    treasury_address: str,
+    creator: 'User',
+    creator_side: CoinSide,
+    creator_escrow_secret: str,
+    creator_escrow_address: str,
+    acceptor: 'User',
+    acceptor_escrow_secret: str,
+    acceptor_escrow_address: str,
+    amount: float,
+) -> Game:
+    """Play a PVP game using isolated escrow wallets.
+
+    SECURITY: Each player's funds are in separate escrow wallets.
+    Winner is paid from their own escrow.
+    All remaining funds from both escrows go to house.
+
+    Args:
+        rpc_url: Solana RPC URL
+        house_wallet_secret: House wallet secret (for receiving fees)
+        treasury_address: Treasury wallet for fees
+        creator: Creator user object
+        creator_side: Creator's chosen side
+        creator_escrow_secret: Creator's escrow wallet secret (encrypted, will decrypt)
+        creator_escrow_address: Creator's escrow wallet address
+        acceptor: Acceptor user object
+        acceptor_escrow_secret: Acceptor's escrow wallet secret (encrypted, will decrypt)
+        acceptor_escrow_address: Acceptor's escrow wallet address
+        amount: Wager amount in SOL (per player)
+
+    Returns:
+        Completed Game object
+    """
+    from .escrow import payout_from_escrow, collect_fees_from_escrow
+    from utils import decrypt_secret
+    import os
+
+    game_id = generate_game_id()
+    encryption_key = os.getenv("ENCRYPTION_KEY")
+
+    # Get player wallets
+    creator_wallet = creator.wallet_address or creator.connected_wallet
+    acceptor_wallet = acceptor.wallet_address or acceptor.connected_wallet
+
+    if not creator_wallet or not acceptor_wallet:
+        raise Exception("One or both players have no wallet")
+
+    # Acceptor takes opposite side
+    acceptor_side = CoinSide.TAILS if creator_side == CoinSide.HEADS else CoinSide.HEADS
+
+    # Create game
+    game = Game(
+        game_id=game_id,
+        game_type=GameType.PVP,
+        player1_id=creator.user_id,
+        player1_side=creator_side,
+        player1_wallet=creator_wallet,
+        player2_id=acceptor.user_id,
+        player2_side=acceptor_side,
+        player2_wallet=acceptor_wallet,
+        amount=amount,
+        status=GameStatus.IN_PROGRESS,
+        created_at=datetime.utcnow(),
+    )
+
+    try:
+        # Decrypt escrow secrets
+        creator_escrow_key = decrypt_secret(creator_escrow_secret, encryption_key)
+        acceptor_escrow_key = decrypt_secret(acceptor_escrow_secret, encryption_key)
+
+        logger.info(f"[ESCROW GAME] Starting PVP game with escrows: creator={creator_escrow_address}, acceptor={acceptor_escrow_address}")
+
+        # STEP 1: FLIP COIN (Provably fair randomness)
+        blockhash = await get_latest_blockhash(rpc_url)
+        game.blockhash = blockhash
+
+        result = flip_coin(blockhash, game_id)
+        game.result = result
+
+        logger.info(f"[ESCROW GAME] Coin flip result: {result.value}")
+
+        # STEP 2: DETERMINE WINNER
+        if result == creator_side:
+            winner = creator
+            winner_wallet = creator_wallet
+            winner_escrow_secret = creator_escrow_key
+            winner_escrow_address = creator_escrow_address
+            loser_escrow_secret = acceptor_escrow_key
+            loser_escrow_address = acceptor_escrow_address
+            game.winner_id = creator.user_id
+        else:
+            winner = acceptor
+            winner_wallet = acceptor_wallet
+            winner_escrow_secret = acceptor_escrow_key
+            winner_escrow_address = acceptor_escrow_address
+            loser_escrow_secret = creator_escrow_key
+            loser_escrow_address = creator_escrow_address
+            game.winner_id = acceptor.user_id
+
+        # STEP 3: CALCULATE PAYOUT
+        # Pot = wager × 2
+        # Game fee = pot × 2%
+        # Payout = pot - game_fee (98% of pot)
+        total_pot = amount * 2
+        game_fee = total_pot * HOUSE_FEE_PCT
+        payout = total_pot - game_fee
+
+        logger.info(f"[ESCROW GAME] Pot: {total_pot} SOL, Game fee: {game_fee} SOL, Payout: {payout} SOL")
+
+        # STEP 4: PAY WINNER FROM WINNER'S ESCROW
+        payout_tx = await payout_from_escrow(
+            rpc_url,
+            winner_escrow_secret,
+            winner_wallet,
+            payout
+        )
+        game.payout_tx = payout_tx
+
+        logger.info(f"[ESCROW GAME] Paid winner {payout} SOL (tx: {payout_tx})")
+
+        # STEP 5: COLLECT FEES FROM BOTH ESCROWS TO HOUSE
+        house_wallet = get_house_wallet_address(house_wallet_secret)
+
+        # Collect from winner's escrow (remaining after payout)
+        winner_fee_tx = await collect_fees_from_escrow(
+            rpc_url,
+            winner_escrow_secret,
+            winner_escrow_address,
+            house_wallet
+        )
+
+        # Collect from loser's escrow (full amount + fee)
+        loser_fee_tx = await collect_fees_from_escrow(
+            rpc_url,
+            loser_escrow_secret,
+            loser_escrow_address,
+            house_wallet
+        )
+
+        logger.info(f"[ESCROW GAME] Collected fees from both escrows (winner: {winner_fee_tx}, loser: {loser_fee_tx})")
+
+        # Note: Total fees collected = game_fee + (TRANSACTION_FEE × 2)
+        # This happens automatically by collecting all remaining from both escrows
+
+        # Mark game as completed
+        game.status = GameStatus.COMPLETED
+        game.completed_at = datetime.utcnow()
+
+        logger.info(f"[ESCROW GAME] Game {game_id} completed - winner: {game.winner_id}")
+
+        return game
+
+    except Exception as e:
+        logger.error(f"Escrow PVP game failed: {e}")
         game.status = GameStatus.CANCELLED
         raise
 

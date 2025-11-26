@@ -18,11 +18,20 @@ from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus
 from game import (
     play_house_game,
     play_pvp_game,
+    play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
     transfer_sol,
     get_latest_blockhash,
+    verify_deposit_transaction,
+    TRANSACTION_FEE,
+    create_escrow_wallet,
+    payout_from_escrow,
+    collect_fees_from_escrow,
+    refund_from_escrow,
+    check_escrow_balance,
 )
+from game.coinflip import get_house_wallet_address
 from utils import (
     encrypt_secret,
     decrypt_secret,
@@ -73,17 +82,20 @@ class QuickFlipRequest(BaseModel):
     wallet_address: str
     side: str  # "heads" or "tails"
     amount: float
+    deposit_tx_signature: Optional[str] = None  # Required for Web users (Phantom/Solflare)
 
 
 class CreateWagerRequest(BaseModel):
     creator_wallet: str
     side: str
     amount: float
+    deposit_tx_signature: Optional[str] = None  # Required for Web users
 
 
 class AcceptWagerRequest(BaseModel):
     wager_id: str
     acceptor_wallet: str
+    deposit_tx_signature: Optional[str] = None  # Required for Web users
 
 
 class CancelWagerRequest(BaseModel):
@@ -216,7 +228,10 @@ async def get_balance(wallet_address: str):
 
 @app.post("/api/game/quick-flip")
 async def quick_flip(request: QuickFlipRequest) -> GameResponse:
-    """Play quick flip vs house."""
+    """Play quick flip vs house.
+
+    For Web users: Must provide deposit_tx_signature proving they sent (wager + fee) to house wallet.
+    """
     try:
         user = ensure_web_user(request.wallet_address)
 
@@ -228,10 +243,38 @@ async def quick_flip(request: QuickFlipRequest) -> GameResponse:
         if request.amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than 0")
 
-        side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
-
         # Decrypt house wallet
         house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
+        house_address = get_house_wallet_address(house_secret)
+
+        # ENFORCE ESCROW FOR WEB USERS
+        # Web users must send SOL first and provide transaction signature
+        if user.platform == "web":
+            if not request.deposit_tx_signature:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Web users must first send {request.amount + TRANSACTION_FEE} SOL ({request.amount} wager + {TRANSACTION_FEE} fee) to house wallet {house_address} and provide the transaction signature"
+                )
+
+            # Verify the deposit transaction on-chain
+            total_required = request.amount + TRANSACTION_FEE
+            is_valid = await verify_deposit_transaction(
+                RPC_URL,
+                request.deposit_tx_signature,
+                request.wallet_address,  # sender
+                house_address,  # recipient
+                total_required  # amount
+            )
+
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid deposit transaction. Please send exactly {total_required} SOL ({request.amount} wager + {TRANSACTION_FEE} fee) to {house_address}"
+                )
+
+            logger.info(f"[REAL MAINNET] Verified Web deposit: {total_required} SOL from {request.wallet_address} (tx: {request.deposit_tx_signature})")
+
+        side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
 
         # Play game
         game = await play_house_game(
@@ -345,7 +388,11 @@ async def get_recent_games(limit: int = 10) -> List[GameResponse]:
 
 @app.post("/api/wager/create")
 async def create_wager(request: CreateWagerRequest) -> WagerResponse:
-    """Create a PVP wager."""
+    """Create a PVP wager with isolated escrow wallet.
+
+    SECURITY: Generates unique escrow wallet for creator's deposit.
+    Prevents single point of failure.
+    """
     try:
         import uuid
 
@@ -359,15 +406,32 @@ async def create_wager(request: CreateWagerRequest) -> WagerResponse:
         if request.amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be greater than 0")
 
-        # Check balance
-        balance = await get_sol_balance(RPC_URL, request.creator_wallet)
-        if balance < request.amount:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-
         side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
 
-        # Create wager
+        # Generate wager ID
         wager_id = f"wager_{uuid.uuid4().hex[:12]}"
+
+        # SECURITY: Create unique escrow wallet for creator
+        # This function:
+        # - Generates unique wallet
+        # - Collects deposit (Telegram) or verifies deposit (Web)
+        # - Prevents signature reuse
+        # - Returns encrypted secret for storage
+        escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
+            RPC_URL,
+            ENCRYPTION_KEY,
+            request.amount,
+            TRANSACTION_FEE,
+            user,
+            request.creator_wallet,
+            request.deposit_tx_signature,
+            wager_id,
+            db
+        )
+
+        logger.info(f"[ESCROW] Created wager {wager_id} with escrow {escrow_address}")
+
+        # Create wager with escrow details
         wager = Wager(
             wager_id=wager_id,
             creator_id=user.user_id,
@@ -375,12 +439,15 @@ async def create_wager(request: CreateWagerRequest) -> WagerResponse:
             creator_side=side,
             amount=request.amount,
             status="open",
+            creator_escrow_address=escrow_address,
+            creator_escrow_secret=encrypted_secret,
+            creator_deposit_tx=deposit_tx,
         )
 
         # Save to database
         db.save_wager(wager)
 
-        logger.info(f"Web wager created: {wager_id} by {request.creator_wallet} - {request.amount} SOL on {side.value}")
+        logger.info(f"Wager created: {wager_id} by {request.creator_wallet} - {request.amount} SOL on {side.value} (escrow: {escrow_address})")
 
         # Broadcast to WebSocket clients
         await manager.broadcast({
@@ -429,7 +496,10 @@ async def get_open_wagers() -> List[WagerResponse]:
 
 @app.post("/api/wager/accept")
 async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
-    """Accept a PVP wager."""
+    """Accept a PVP wager with isolated escrow wallets.
+
+    SECURITY: Creates second escrow wallet for acceptor, executes game using both escrows.
+    """
     try:
         user = ensure_web_user(request.acceptor_wallet)
 
@@ -444,35 +514,58 @@ async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
         if wager.creator_wallet == request.acceptor_wallet:
             raise HTTPException(status_code=400, detail="Cannot accept your own wager")
 
-        # Check balance
-        balance = await get_sol_balance(RPC_URL, request.acceptor_wallet)
-        if balance < wager.amount:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-
         # Get creator
         creator = db.get_user(wager.creator_id)
         if not creator:
             raise HTTPException(status_code=404, detail="Wager creator not found")
 
-        # Update wager status
-        wager.status = "accepted"
+        # SECURITY: Change status to "accepting" to prevent race conditions
+        wager.status = "accepting"
         wager.acceptor_id = user.user_id
+        db.save_wager(wager)
 
-        # Decrypt house wallet for custodial transactions
+        logger.info(f"[WAGER] Status changed to 'accepting' for wager {wager.wager_id}")
+
+        # SECURITY: Create unique escrow wallet for acceptor
+        escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
+            RPC_URL,
+            ENCRYPTION_KEY,
+            wager.amount,
+            TRANSACTION_FEE,
+            user,
+            request.acceptor_wallet,
+            request.deposit_tx_signature,
+            wager.wager_id,
+            db
+        )
+
+        logger.info(f"[ESCROW] Created acceptor escrow {escrow_address} for wager {wager.wager_id}")
+
+        # Update wager with acceptor's escrow details
+        wager.acceptor_escrow_address = escrow_address
+        wager.acceptor_escrow_secret = encrypted_secret
+        wager.acceptor_deposit_tx = deposit_tx
+
+        # Decrypt house wallet
         house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
 
-        # Play PVP game
-        game = await play_pvp_game(
+        # Play PVP game with isolated escrow wallets
+        game = await play_pvp_game_with_escrows(
             RPC_URL,
             house_secret,
             TREASURY_WALLET,
             creator,
             wager.creator_side,
+            wager.creator_escrow_secret,
+            wager.creator_escrow_address,
             user,
+            wager.acceptor_escrow_secret,
+            wager.acceptor_escrow_address,
             wager.amount
         )
 
-        # Link game to wager
+        # Update wager status to accepted/completed
+        wager.status = "accepted"
         wager.game_id = game.game_id
         db.save_wager(wager)
 
