@@ -23,7 +23,6 @@ from telegram.ext import (
 from database import Database, User, GameType, CoinSide, Wager
 from game import (
     play_house_game,
-    play_pvp_game,
     play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
@@ -753,7 +752,10 @@ async def show_wager_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Accept a PVP wager."""
+    """Accept a PVP wager with isolated escrow wallets.
+
+    SECURITY: Creates unique escrow wallet for acceptor and uses play_pvp_game_with_escrows().
+    """
     user = await ensure_user(update)
     wager_id = data.split(":")[1]
 
@@ -771,14 +773,21 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         await update.callback_query.answer("You can't accept your own wager!", show_alert=True)
         return
 
-    # Check balance
+    # Check balance (wager + transaction fee)
+    total_required = wager.amount + TRANSACTION_FEE
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
-    if balance < wager.amount:
-        await update.callback_query.answer("Insufficient balance to accept this wager!", show_alert=True)
+    if balance < total_required:
+        await update.callback_query.answer(
+            f"Insufficient balance! Need {format_sol(total_required)} SOL ({format_sol(wager.amount)} wager + {format_sol(TRANSACTION_FEE)} fee)",
+            show_alert=True
+        )
         return
 
     await update.callback_query.edit_message_text(
-        "⚔️ *Accepting wager...*\n\n🎲 Flipping coin...\n\nPlease wait...",
+        "⚔️ *Accepting wager...*\n\n"
+        "🔒 Creating your escrow...\n"
+        "💸 Collecting deposit...\n\n"
+        "Please wait...",
         parse_mode="Markdown"
     )
 
@@ -788,23 +797,59 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         if not creator:
             raise Exception("Creator not found")
 
-        # Update wager status
-        wager.status = "accepted"
+        # SECURITY: Change status to "accepting" (prevent race conditions)
+        wager.status = "accepting"
         wager.acceptor_id = user.user_id
+        db.save_wager(wager)
 
-        # Decrypt house wallet for custodial game
+        logger.info(f"[ESCROW] Acceptor {user.user_id} accepting wager {wager_id}, creating escrow...")
+
+        # SECURITY: Create acceptor's escrow wallet and collect deposit
+        acceptor_escrow_address, acceptor_encrypted_secret, acceptor_deposit_tx = await create_escrow_wallet(
+            RPC_URL,
+            ENCRYPTION_KEY,
+            wager.amount,
+            TRANSACTION_FEE,
+            user,
+            user.wallet_address,
+            None,  # Telegram users don't provide signature (custodial)
+            wager_id,
+            db
+        )
+
+        logger.info(f"[ESCROW] Acceptor escrow created: {acceptor_escrow_address}")
+
+        # Update wager with acceptor's escrow details
+        wager.acceptor_escrow_address = acceptor_escrow_address
+        wager.acceptor_escrow_secret = acceptor_encrypted_secret
+        wager.acceptor_deposit_tx = acceptor_deposit_tx
+        wager.status = "accepted"
+        db.save_wager(wager)
+
+        # Decrypt house wallet (for receiving fees)
         house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
 
-        # Play PVP game
-        game = await play_pvp_game(
+        await update.callback_query.edit_message_text(
+            "⚔️ *Escrows secured!*\n\n🎲 Flipping coin...\n\nPlease wait...",
+            parse_mode="Markdown"
+        )
+
+        # Play PVP game with ISOLATED ESCROWS (NEW SECURE METHOD)
+        game = await play_pvp_game_with_escrows(
             RPC_URL,
             house_secret,
             TREASURY_WALLET,
             creator,
             wager.creator_side,
+            wager.creator_escrow_secret,
+            wager.creator_escrow_address,
             user,
+            wager.acceptor_escrow_secret,
+            wager.acceptor_escrow_address,
             wager.amount
         )
+
+        logger.info(f"[ESCROW] PVP game {game.game_id} completed with escrows")
 
         # Link game to wager
         wager.game_id = game.game_id
@@ -910,7 +955,10 @@ async def show_pvp_result(update: Update, context: ContextTypes.DEFAULT_TYPE, ga
 
 
 async def cancel_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
-    """Cancel a wager."""
+    """Cancel a wager with escrow refund.
+
+    SECURITY: Refunds wager amount to creator, keeps 0.025 SOL transaction fee.
+    """
     user = await ensure_user(update)
     wager_id = data.split(":")[1]
 
@@ -930,17 +978,75 @@ async def cancel_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         await update.callback_query.answer("This wager can't be cancelled.", show_alert=True)
         return
 
-    # Cancel wager
-    wager.status = "cancelled"
-    db.save_wager(wager)
-
-    logger.info(f"Wager cancelled: {wager_id} by user {user.user_id}")
+    # Verify escrow exists
+    if not wager.creator_escrow_address or not wager.creator_escrow_secret:
+        # Old wager without escrow - just mark as cancelled
+        wager.status = "cancelled"
+        db.save_wager(wager)
+        logger.warning(f"[CANCEL] Wager {wager_id} has no escrow, just marking cancelled")
+        await update.callback_query.edit_message_text(
+            f"✅ *Wager Cancelled*\n\nYour wager of {format_sol(wager.amount)} SOL has been cancelled.",
+            parse_mode="Markdown",
+            reply_markup=menus.main_menu()
+        )
+        return
 
     await update.callback_query.edit_message_text(
-        f"✅ *Wager Cancelled*\n\nYour wager of {format_sol(wager.amount)} SOL has been cancelled.",
-        parse_mode="Markdown",
-        reply_markup=menus.main_menu()
+        "❌ *Cancelling wager...*\n\n💸 Processing refund...\n\nPlease wait...",
+        parse_mode="Markdown"
     )
+
+    try:
+        # Decrypt house wallet
+        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
+        from game.coinflip import get_house_wallet_address
+        house_wallet = get_house_wallet_address(house_secret)
+
+        # Decrypt escrow secret
+        creator_escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
+
+        logger.info(f"[CANCEL] Refunding wager {wager_id} from escrow {wager.creator_escrow_address}")
+
+        # Refund from escrow (returns wager, keeps 0.025 SOL fee)
+        refund_tx, fee_tx = await refund_from_escrow(
+            RPC_URL,
+            creator_escrow_secret,
+            wager.creator_escrow_address,
+            user.wallet_address,
+            house_wallet,
+            wager.amount,
+            TRANSACTION_FEE
+        )
+
+        logger.info(f"[CANCEL] Refunded {wager.amount} SOL (tx: {refund_tx}), collected fee (tx: {fee_tx})")
+
+        # Mark wager as cancelled
+        wager.status = "cancelled"
+        db.save_wager(wager)
+
+        # Success message
+        msg = (
+            f"✅ *Wager Cancelled*\n\n"
+            f"💰 Refunded: *{format_sol(wager.amount)} SOL*\n"
+            f"💳 Fee Kept: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
+            f"Your wager has been cancelled and funds returned.\n\n"
+        )
+        if refund_tx:
+            msg += f"📝 [View Refund Transaction]({format_tx_link(refund_tx)})"
+
+        await update.callback_query.edit_message_text(
+            msg,
+            parse_mode="Markdown",
+            reply_markup=menus.main_menu()
+        )
+
+    except Exception as e:
+        logger.error(f"Cancel wager failed: {e}")
+        await update.callback_query.edit_message_text(
+            f"❌ *Cancellation Failed*\n\nError: {str(e)}\n\nPlease try again or contact support.",
+            parse_mode="Markdown",
+            reply_markup=menus.main_menu()
+        )
 
 
 async def show_my_wagers(update: Update, context: ContextTypes.DEFAULT_TYPE):

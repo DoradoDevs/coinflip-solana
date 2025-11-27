@@ -17,7 +17,6 @@ from pydantic import BaseModel
 from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus
 from game import (
     play_house_game,
-    play_pvp_game,
     play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
@@ -647,7 +646,10 @@ async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
 
 @app.post("/api/wager/cancel")
 async def cancel_wager_endpoint(request: CancelWagerRequest):
-    """Cancel a wager (only creator can cancel)."""
+    """Cancel a wager with escrow refund (only creator can cancel).
+
+    SECURITY: Refunds wager amount to creator, keeps 0.025 SOL transaction fee.
+    """
     try:
         user = ensure_web_user(request.creator_wallet)
 
@@ -666,7 +668,47 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
         if wager.status != "open":
             raise HTTPException(status_code=400, detail="Can only cancel open wagers")
 
-        # Cancel wager
+        # Verify escrow exists
+        if not wager.creator_escrow_address or not wager.creator_escrow_secret:
+            # Old wager without escrow - just mark as cancelled
+            wager.status = "cancelled"
+            db.save_wager(wager)
+            logger.warning(f"[CANCEL] Wager {request.wager_id} has no escrow, just marking cancelled")
+
+            await manager.broadcast({
+                "type": "wager_cancelled",
+                "wager_id": request.wager_id
+            })
+
+            return {
+                "success": True,
+                "message": "Wager cancelled (no escrow refund - old wager)",
+                "wager_id": request.wager_id
+            }
+
+        # Decrypt house wallet
+        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
+        house_wallet = get_house_wallet_address(house_secret)
+
+        # Decrypt escrow secret
+        creator_escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
+
+        logger.info(f"[CANCEL] Refunding wager {request.wager_id} from escrow {wager.creator_escrow_address}")
+
+        # Refund from escrow (returns wager, keeps 0.025 SOL fee)
+        refund_tx, fee_tx = await refund_from_escrow(
+            RPC_URL,
+            creator_escrow_secret,
+            wager.creator_escrow_address,
+            request.creator_wallet,
+            house_wallet,
+            wager.amount,
+            TRANSACTION_FEE
+        )
+
+        logger.info(f"[CANCEL] Refunded {wager.amount} SOL (tx: {refund_tx}), collected fee (tx: {fee_tx})")
+
+        # Mark wager as cancelled
         wager.status = "cancelled"
         db.save_wager(wager)
 
@@ -675,13 +717,19 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
         # Broadcast to WebSocket clients
         await manager.broadcast({
             "type": "wager_cancelled",
-            "wager_id": request.wager_id
+            "wager_id": request.wager_id,
+            "refund_tx": refund_tx,
+            "fee_tx": fee_tx
         })
 
         return {
             "success": True,
-            "message": "Wager cancelled successfully",
-            "wager_id": request.wager_id
+            "message": f"Wager cancelled. Refunded {wager.amount} SOL, kept {TRANSACTION_FEE} SOL fee",
+            "wager_id": request.wager_id,
+            "refund_amount": wager.amount,
+            "fee_kept": TRANSACTION_FEE,
+            "refund_tx": refund_tx,
+            "fee_tx": fee_tx
         }
 
     except HTTPException:
