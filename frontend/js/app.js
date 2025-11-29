@@ -47,8 +47,8 @@ function initializeEventListeners() {
     // Wallet connection
     document.getElementById('connectWallet').addEventListener('click', connectWallet);
 
-    // Game mode selection
-    document.getElementById('quickFlipMode').addEventListener('click', () => {
+    // Game mode selection - PVP only
+    document.getElementById('pvpMode').addEventListener('click', () => {
         if (!wallet.connected) {
             alert('Please connect your wallet first!');
             return;
@@ -56,12 +56,17 @@ function initializeEventListeners() {
         showQuickFlipSection();
     });
 
-    document.getElementById('pvpMode').addEventListener('click', () => {
-        alert('PVP Mode: Create and accept wagers from other players!');
-        if (wallet.connected) {
-            showQuickFlipSection(); // For now, use same UI
+    // Create wager button
+    document.getElementById('createWagerBtn').addEventListener('click', () => {
+        if (!wallet.connected) {
+            alert('Please connect your wallet first!');
+            return;
         }
+        showQuickFlipSection();
     });
+
+    // Load active wagers on page load
+    loadActiveWagers();
 
     // Navigation
     document.getElementById('backToModes').addEventListener('click', showGameModeSection);
@@ -262,46 +267,81 @@ function showConfirmation() {
 }
 
 /**
- * Play Game
+ * Create PVP Wager
  */
 async function playGame() {
-    // Show flipping animation
+    // Show creating animation
     document.getElementById('confirmGame').style.display = 'none';
     document.getElementById('flipping').style.display = 'block';
+    document.querySelector('#flipping h3').textContent = 'Creating Wager...';
 
     try {
-        // Call API to play game
-        const response = await fetch(`${API_URL}/game/quick-flip`, {
+        // Call API to create wager
+        const response = await fetch(`${API_URL}/wager/create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                wallet_address: wallet.getAddress(),
-                side: gameState.selectedSide,
+                creator_wallet: wallet.getAddress(),
+                creator_side: gameState.selectedSide,
                 amount: gameState.selectedAmount
             })
         });
 
         if (!response.ok) {
-            throw new Error('Game failed');
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create wager');
         }
 
-        const gameResult = await response.json();
+        const wager = await response.json();
 
-        // Wait for animation
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait briefly
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Show result
-        showResult(gameResult);
+        // Show success
+        showWagerCreated(wager);
 
         // Update stats
         await loadUserStats();
-        await updateWalletUI();
+        await loadActiveWagers();
 
     } catch (err) {
-        console.error('Error playing game:', err);
-        alert('Game failed! Please try again.');
+        console.error('Error creating wager:', err);
+        alert(err.message || 'Failed to create wager! Please try again.');
         resetGame();
     }
+}
+
+/**
+ * Show Wager Created Success
+ */
+function showWagerCreated(wager) {
+    const sideEmoji = wager.creator_side === 'heads' ? '🪙' : '🎯';
+
+    const resultHTML = `
+        <div class="result-icon">✅</div>
+        <div class="result-title win">WAGER CREATED!</div>
+        <div class="result-details">
+            <div class="result-row">
+                <span>Your Side:</span>
+                <span>${sideEmoji} ${wager.creator_side.toUpperCase()}</span>
+            </div>
+            <div class="result-row">
+                <span>Amount:</span>
+                <span>${wager.amount} SOL</span>
+            </div>
+            <div class="result-row">
+                <span>Status:</span>
+                <span style="color: var(--warning);">Waiting for opponent...</span>
+            </div>
+        </div>
+        <p style="margin-top: 20px; color: var(--text-muted); font-size: 0.9rem;">
+            Share your wager with friends or wait for someone to accept it!
+        </p>
+    `;
+
+    document.getElementById('resultContent').innerHTML = resultHTML;
+    document.getElementById('flipping').style.display = 'none';
+    document.getElementById('gameResult').style.display = 'block';
 }
 
 /**
@@ -445,3 +485,75 @@ window.onclick = (event) => {
         closeModal();
     }
 };
+
+/**
+ * Load Active Wagers
+ */
+async function loadActiveWagers() {
+    try {
+        const response = await fetch(`${API_URL}/wagers/active`);
+        const wagers = await response.json();
+
+        const container = document.getElementById('activeWagers');
+
+        if (!wagers || wagers.length === 0) {
+            container.innerHTML = '<p class="no-wagers">No active wagers. Create one below!</p>';
+            return;
+        }
+
+        container.innerHTML = wagers.map(wager => `
+            <div class="wager-card" data-wager-id="${wager.id}">
+                <div class="wager-info">
+                    <span class="wager-amount">${wager.amount} SOL</span>
+                    <span class="wager-side">${wager.creator_side === 'heads' ? '🪙 Heads' : '🎯 Tails'}</span>
+                    <span class="wager-creator">${wager.creator_wallet.slice(0, 4)}...${wager.creator_wallet.slice(-4)}</span>
+                </div>
+                <button class="btn btn-primary btn-accept" onclick="acceptWager('${wager.id}')">
+                    Accept (${wager.creator_side === 'heads' ? '🎯 Tails' : '🪙 Heads'})
+                </button>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        console.error('Error loading wagers:', err);
+    }
+}
+
+/**
+ * Accept a Wager
+ */
+async function acceptWager(wagerId) {
+    if (!wallet.connected) {
+        alert('Please connect your wallet first!');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_URL}/wager/${wagerId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wallet_address: wallet.getAddress() })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            alert(error.detail || 'Failed to accept wager');
+            return;
+        }
+
+        const result = await response.json();
+        alert(`Wager accepted! Result: ${result.result.toUpperCase()} - ${result.winner_wallet === wallet.getAddress() ? 'YOU WON!' : 'You lost'}`);
+
+        // Refresh wagers and stats
+        loadActiveWagers();
+        loadUserStats();
+        updateWalletUI();
+
+    } catch (err) {
+        console.error('Error accepting wager:', err);
+        alert('Failed to accept wager');
+    }
+}
+
+// Refresh wagers every 10 seconds
+setInterval(loadActiveWagers, 10000);

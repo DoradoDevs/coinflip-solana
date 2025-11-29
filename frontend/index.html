@@ -29,28 +29,35 @@
         <main class="main-content">
             <!-- Game Mode Selection -->
             <section id="gameModeSection" class="game-mode-section">
-                <h2>Choose Game Mode</h2>
+                <h2>Start Playing</h2>
                 <div class="game-modes">
-                    <div class="game-mode-card" id="quickFlipMode">
-                        <div class="mode-icon">🎲</div>
-                        <h3>Quick Flip</h3>
-                        <p>Play instantly vs House</p>
-                        <p class="mode-detail">50/50 odds • Instant result</p>
-                    </div>
-                    <div class="game-mode-card" id="pvpMode">
+                    <div class="game-mode-card active" id="pvpMode">
                         <div class="mode-icon">⚔️</div>
-                        <h3>PVP Wager</h3>
+                        <h3>PVP Coinflip</h3>
                         <p>Challenge other players</p>
-                        <p class="mode-detail">Coming Soon!</p>
+                        <p class="mode-detail">Create or accept wagers • 2% fee</p>
                     </div>
                 </div>
+
+                <!-- Active Wagers Section -->
+                <div class="active-wagers-section">
+                    <h3>🔥 Active Wagers</h3>
+                    <div id="activeWagers" class="wagers-list">
+                        <p class="no-wagers">No active wagers. Create one below!</p>
+                    </div>
+                </div>
+
+                <!-- Create Wager Button -->
+                <button id="createWagerBtn" class="btn btn-primary btn-large" style="margin-top: 20px;">
+                    ⚔️ Create New Wager
+                </button>
             </section>
 
-            <!-- Quick Flip Game -->
+            <!-- Create PVP Wager -->
             <section id="quickFlipSection" class="game-section" style="display: none;">
                 <button class="btn-back" id="backToModes">← Back</button>
 
-                <h2>🎲 Quick Flip vs House</h2>
+                <h2>⚔️ Create PVP Wager</h2>
 
                 <!-- Step 1: Choose Side -->
                 <div id="chooseSide" class="game-step">

@@ -545,3 +545,100 @@ body {
     opacity: 0.5;
     pointer-events: none;
 }
+
+/* Active Wagers Section */
+.active-wagers-section {
+    margin-top: 40px;
+    padding: 30px;
+    background: var(--surface);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+}
+
+.active-wagers-section h3 {
+    text-align: center;
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+    color: var(--primary);
+}
+
+.wagers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.no-wagers {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 30px;
+}
+
+.wager-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.wager-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 0 20px var(--shadow);
+}
+
+.wager-info {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.wager-amount {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.wager-side {
+    font-size: 1.1rem;
+    padding: 5px 12px;
+    background: var(--surface);
+    border-radius: 20px;
+}
+
+.wager-creator {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.btn-accept {
+    padding: 12px 24px;
+    font-size: 1rem;
+}
+
+/* Single game mode card centered */
+.game-modes {
+    justify-content: center;
+}
+
+.game-mode-card.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 30px var(--shadow);
+}
+
+/* Responsive wager cards */
+@media (max-width: 768px) {
+    .wager-card {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+
+    .wager-info {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
