@@ -433,8 +433,7 @@ async function claimReferralEarnings() {
 
 function requireLogin() {
     if (!currentUser) {
-        alert('Please login or create an account to play');
-        showAuthModal('login');
+        showAuthModal('register');
         return false;
     }
     return true;
@@ -613,15 +612,23 @@ async function continueToDeposit() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 creator_wallet: createWagerState.creatorWallet,
-                creator_side: createWagerState.selectedSide,
-                amount: createWagerState.selectedAmount,
-                source: 'web'
+                side: createWagerState.selectedSide,
+                amount: createWagerState.selectedAmount
             })
         });
 
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.detail || 'Failed to create wager');
+            // Handle FastAPI validation errors (detail can be array or string)
+            let errorMsg = 'Failed to create wager';
+            if (error.detail) {
+                if (typeof error.detail === 'string') {
+                    errorMsg = error.detail;
+                } else if (Array.isArray(error.detail)) {
+                    errorMsg = error.detail.map(e => e.msg || e).join(', ');
+                }
+            }
+            throw new Error(errorMsg);
         }
 
         const data = await response.json();
