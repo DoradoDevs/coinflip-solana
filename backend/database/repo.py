@@ -155,7 +155,34 @@ class Database:
             )
         """)
 
-        # Indexes for performance
+        # === MIGRATIONS: Safely add missing columns to existing tables ===
+        # Get existing columns in users table
+        cursor.execute("PRAGMA table_info(users)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        # Add missing columns to users table (for existing databases)
+        user_migrations = [
+            ("email", "TEXT"),
+            ("password_hash", "TEXT"),
+            ("email_verified", "INTEGER DEFAULT 0"),
+            ("username", "TEXT"),
+            ("display_name", "TEXT"),
+            ("session_token", "TEXT"),
+            ("session_expires", "TEXT"),
+            ("last_login", "TEXT"),
+            ("is_admin", "INTEGER DEFAULT 0"),
+        ]
+
+        for col_name, col_type in user_migrations:
+            if col_name not in existing_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Migration: Added column '{col_name}' to users table")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        logger.warning(f"Migration warning for {col_name}: {e}")
+
+        # Indexes for performance (only create if column exists)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_player1 ON games(player1_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_player2 ON games(player2_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_status ON games(status)")
@@ -163,10 +190,29 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_wagers_creator ON wagers(creator_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_used_signatures_wallet ON used_signatures(user_wallet)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_session ON users(session_token)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin)")
+
+        # Only create indexes if columns exist
+        if "email" in existing_columns or "email" in [m[0] for m in user_migrations]:
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            except sqlite3.OperationalError:
+                pass
+        if "session_token" in existing_columns or "session_token" in [m[0] for m in user_migrations]:
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_session ON users(session_token)")
+            except sqlite3.OperationalError:
+                pass
+        if "referral_code" in existing_columns:
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
+            except sqlite3.OperationalError:
+                pass
+        if "is_admin" in existing_columns or "is_admin" in [m[0] for m in user_migrations]:
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin)")
+            except sqlite3.OperationalError:
+                pass
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tickets_type ON support_tickets(ticket_type)")
 
