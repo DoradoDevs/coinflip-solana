@@ -30,8 +30,8 @@ from game import (
     refund_from_escrow,
     check_escrow_balance,
 )
-# Note: HOUSE_WALLET_SECRET is used for referral commission payouts only
 # All game fees go directly to TREASURY_WALLET
+# Referral commissions are paid from escrow before sweeping
 from utils import (
     encrypt_secret,
     decrypt_secret,
@@ -39,7 +39,7 @@ from utils import (
     format_win_rate,
 )
 from notifications import notify_wager_accepted
-from referrals import claim_referral_earnings, get_referral_escrow_balance
+from referrals import claim_referral_earnings, get_referral_escrow_balance, get_claimable_referral_balance, REFERRAL_ESCROW_RENT_MINIMUM
 
 # Load environment
 load_dotenv()
@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 RPC_URL = os.getenv("RPC_URL")
-HOUSE_WALLET_SECRET = os.getenv("HOUSE_WALLET_SECRET")  # Used ONLY for referral commission payouts
 TREASURY_WALLET = os.getenv("TREASURY_WALLET")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
@@ -525,13 +524,10 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
         wager.acceptor_escrow_secret = encrypted_secret
         wager.acceptor_deposit_tx = deposit_tx
 
-        # Decrypt house wallet
-        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
-
         # Play PVP game with isolated escrow wallets
+        # All fees go to treasury, referral commissions paid from escrow
         game = await play_pvp_game_with_escrows(
             RPC_URL,
-            house_secret,
             TREASURY_WALLET,
             creator,
             wager.creator_side,
@@ -768,14 +764,17 @@ async def get_referral_balance_endpoint(user_wallet: str):
         # Get user
         user = ensure_web_user(user_wallet)
 
-        # Get escrow balance
-        escrow_balance = await get_referral_escrow_balance(user, RPC_URL)
+        # Get raw escrow balance and claimable amount
+        raw_balance = await get_referral_escrow_balance(user, RPC_URL)
+        claimable_balance = await get_claimable_referral_balance(user, RPC_URL)
 
         return {
             "success": True,
             "user_id": user.user_id,
             "referral_escrow_address": user.referral_payout_escrow_address,
-            "current_balance": escrow_balance,
+            "raw_balance": raw_balance,  # Actual SOL in escrow
+            "claimable_balance": claimable_balance,  # Amount user can claim (above threshold)
+            "rent_threshold": REFERRAL_ESCROW_RENT_MINIMUM,  # 0.01 SOL kept for rent
             "total_lifetime_earnings": user.referral_earnings,
             "total_lifetime_claimed": user.total_referral_claimed,
             "total_referrals": user.total_referrals,

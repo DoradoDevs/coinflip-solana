@@ -112,18 +112,22 @@ async def send_referral_commission(
     return tx_sig
 
 
+# Minimum SOL to keep in referral escrow for rent + future tx fees
+REFERRAL_ESCROW_RENT_MINIMUM = 0.01
+
+
 async def get_referral_escrow_balance(
     user: User,
     rpc_url: str
 ) -> float:
-    """Get current balance of user's referral escrow wallet.
+    """Get raw balance of user's referral escrow wallet.
 
     Args:
         user: User object
         rpc_url: Solana RPC URL
 
     Returns:
-        Balance in SOL
+        Raw balance in SOL
     """
     if not user.referral_payout_escrow_address:
         return 0.0
@@ -136,6 +140,31 @@ async def get_referral_escrow_balance(
         return 0.0
 
 
+async def get_claimable_referral_balance(
+    user: User,
+    rpc_url: str
+) -> float:
+    """Get claimable referral balance (above rent threshold).
+
+    Returns 0.0 until balance exceeds REFERRAL_ESCROW_RENT_MINIMUM (0.01 SOL).
+    This ensures escrow always has enough for rent and future transactions.
+
+    Args:
+        user: User object
+        rpc_url: Solana RPC URL
+
+    Returns:
+        Claimable balance in SOL (0.0 if below threshold)
+    """
+    raw_balance = await get_referral_escrow_balance(user, rpc_url)
+
+    # Only show claimable amount above threshold
+    if raw_balance <= REFERRAL_ESCROW_RENT_MINIMUM:
+        return 0.0
+
+    return raw_balance - REFERRAL_ESCROW_RENT_MINIMUM
+
+
 async def claim_referral_earnings(
     user: User,
     rpc_url: str,
@@ -146,6 +175,7 @@ async def claim_referral_earnings(
     """Claim referral earnings from escrow to payout wallet.
 
     Takes 1% treasury fee on claims.
+    Leaves REFERRAL_ESCROW_RENT_MINIMUM (0.01 SOL) in escrow for rent.
 
     Args:
         user: User object
@@ -165,12 +195,12 @@ async def claim_referral_earnings(
     if not user.referral_payout_escrow_address or not user.referral_payout_escrow_secret:
         return False, "You have no referral earnings to claim yet.", 0.0
 
-    # Get escrow balance
-    balance = await get_referral_escrow_balance(user, rpc_url)
+    # Get claimable balance (amount above rent threshold)
+    claimable = await get_claimable_referral_balance(user, rpc_url)
 
-    # Need at least 0.01 SOL to make claim worthwhile (covers fees + minimum)
-    if balance < 0.01:
-        return False, f"Insufficient balance to claim. You have {balance:.6f} SOL (minimum 0.01 SOL required).", 0.0
+    if claimable <= 0:
+        raw_balance = await get_referral_escrow_balance(user, rpc_url)
+        return False, f"Nothing to claim yet. Balance: {raw_balance:.6f} SOL (need >{REFERRAL_ESCROW_RENT_MINIMUM} SOL)", 0.0
 
     # Decrypt escrow secret
     try:
@@ -179,13 +209,13 @@ async def claim_referral_earnings(
         logger.error(f"Failed to decrypt referral escrow for user {user.user_id}: {e}")
         return False, "Error accessing your referral escrow. Please contact support.", 0.0
 
-    # Calculate amounts (1% treasury fee + 0.000005 SOL for tx fees)
-    treasury_fee_amount = balance * 0.01
+    # Calculate amounts (1% treasury fee on claimable amount)
+    treasury_fee_amount = claimable * 0.01
     tx_fee_reserve = 0.000005 * 2  # Two transactions (to treasury, to user)
-    user_claim_amount = balance - treasury_fee_amount - tx_fee_reserve
+    user_claim_amount = claimable - treasury_fee_amount - tx_fee_reserve
 
     if user_claim_amount <= 0:
-        return False, f"Balance too low after fees. Need at least {treasury_fee_amount + tx_fee_reserve:.6f} SOL.", 0.0
+        return False, f"Claimable amount too low after fees ({claimable:.6f} SOL).", 0.0
 
     try:
         # Send treasury fee
@@ -198,7 +228,7 @@ async def claim_referral_earnings(
 
         logger.info(f"Treasury fee collected: {treasury_fee_amount:.6f} SOL from user {user.user_id} claim | TX: {treasury_tx}")
 
-        # Send remainder to user's payout wallet
+        # Send remainder to user's payout wallet (leaving rent minimum in escrow)
         payout_tx = await transfer_sol(
             rpc_url=rpc_url,
             from_secret=escrow_secret,

@@ -373,7 +373,6 @@ async def play_pvp_game(
 
 async def play_pvp_game_with_escrows(
     rpc_url: str,
-    house_wallet_secret: str,
     treasury_address: str,
     creator: 'User',
     creator_side: CoinSide,
@@ -388,11 +387,11 @@ async def play_pvp_game_with_escrows(
 
     SECURITY: Each player's funds are in separate escrow wallets.
     Winner is paid from their own escrow.
+    Referral commissions paid from escrow before sweeping.
     All remaining funds (fees) from both escrows go to treasury.
 
     Args:
         rpc_url: Solana RPC URL
-        house_wallet_secret: Wallet secret for referral commission payouts only
         treasury_address: Treasury wallet for all game fees
         creator: Creator user object
         creator_side: Creator's chosen side
@@ -509,9 +508,52 @@ async def play_pvp_game_with_escrows(
         game.payout_tx = f"{winner_payout_tx},{loser_payout_tx}"  # Store both tx signatures
         logger.info(f"[ESCROW GAME] Paid winner {total_payout} SOL (winner escrow: {winner_payout_tx}, loser escrow: {loser_payout_tx})")
 
-        # STEP 5: SWEEP ALL REMAINING FUNDS TO TREASURY
-        # After paying winner 98% from each escrow, sweep whatever is left to treasury
-        # This includes: 2% game fees + 0.025 tx fees + any dust/rounding errors
+        # STEP 5: SEND REFERRAL COMMISSION (if winner was referred)
+        # Commission comes from loser's escrow BEFORE sweeping to treasury
+        referral_commission_amount = 0.0
+        if winner.referred_by:
+            # Import here to avoid circular dependency
+            from database import repo
+            from tiers import calculate_referral_commission, get_referral_commission_rate
+            from referrals import get_or_create_referral_escrow
+
+            # Get referrer
+            referrer = repo.Database().get_user(winner.referred_by)
+            if referrer:
+                # Calculate commission based on referrer's tier
+                game_fees_only = fee_per_escrow * 2  # Exclude tx fees from commission
+                referral_commission_amount = calculate_referral_commission(game_fees_only, referrer)
+
+                # Send commission from loser's escrow to referrer's escrow wallet
+                try:
+                    # Get or create referrer's escrow
+                    referrer_escrow, _ = await get_or_create_referral_escrow(
+                        referrer, encryption_key, repo.Database()
+                    )
+
+                    # Transfer from loser's escrow to referrer's escrow
+                    commission_tx = await transfer_sol(
+                        rpc_url,
+                        loser_escrow_secret,
+                        referrer_escrow,
+                        referral_commission_amount
+                    )
+
+                    # Update referrer's total earnings
+                    referrer.referral_earnings += referral_commission_amount
+                    repo.Database().save_user(referrer)
+
+                    commission_rate = get_referral_commission_rate(referrer)
+                    logger.info(f"[REFERRAL] Winner {winner.user_id} referred by {referrer.user_id}")
+                    logger.info(f"[REFERRAL] Commission sent from escrow: {referral_commission_amount:.6f} SOL ({referrer.tier} tier: {commission_rate*100:.1f}%) | TX: {commission_tx}")
+                except Exception as e:
+                    logger.error(f"[REFERRAL] Failed to send commission: {e}", exc_info=True)
+                    # Don't fail the game if referral payment fails
+                    referral_commission_amount = 0.0
+
+        # STEP 6: SWEEP ALL REMAINING FUNDS TO TREASURY
+        # After paying winner and referral commission, sweep whatever is left
+        # This includes: 2% game fees + 0.025 tx fees - referral commission + any dust
         winner_fee_tx = await collect_fees_from_escrow(
             rpc_url,
             winner_escrow_secret,
@@ -527,43 +569,8 @@ async def play_pvp_game_with_escrows(
         )
 
         logger.info(f"[ESCROW GAME] Swept remaining funds to treasury (winner escrow: {winner_fee_tx}, loser escrow: {loser_fee_tx})")
-        logger.info(f"[ESCROW GAME] Expected revenue: ~{total_fees:.6f} SOL ({winner_fee_rate*100:.1f}% game fees + tx fees + dust)")
-
-        # STEP 6: SEND REFERRAL COMMISSION (if winner was referred)
-        # Commission is sent directly to referrer's individual escrow wallet
-        referral_commission_amount = 0.0
-        if winner.referred_by:
-            # Import here to avoid circular dependency
-            from database import repo
-            from tiers import calculate_referral_commission, get_referral_commission_rate
-            from referrals import send_referral_commission
-
-            # Get referrer
-            referrer = repo.Database().get_user(winner.referred_by)
-            if referrer:
-                # Calculate commission based on referrer's tier
-                game_fees_only = fee_per_escrow * 2  # Exclude tx fees from commission
-                referral_commission_amount = calculate_referral_commission(game_fees_only, referrer)
-
-                # Send commission from treasury to referrer's escrow wallet
-                try:
-                    commission_tx = await send_referral_commission(
-                        referrer=referrer,
-                        commission_amount=referral_commission_amount,
-                        from_wallet_secret=house_wallet_secret,
-                        rpc_url=rpc_url,
-                        encryption_key=encryption_key,
-                        db=repo.Database(),
-                        game_id=game_id
-                    )
-
-                    commission_rate = get_referral_commission_rate(referrer)
-                    logger.info(f"[REFERRAL] Winner {winner.user_id} referred by {referrer.user_id}")
-                    logger.info(f"[REFERRAL] Commission sent: {referral_commission_amount:.6f} SOL ({referrer.tier} tier: {commission_rate*100:.1f}%) | TX: {commission_tx}")
-                except Exception as e:
-                    logger.error(f"[REFERRAL] Failed to send commission: {e}", exc_info=True)
-                    # Don't fail the game if referral payment fails
-                    referral_commission_amount = 0.0
+        net_treasury = total_fees - referral_commission_amount
+        logger.info(f"[ESCROW GAME] Net revenue: ~{net_treasury:.6f} SOL (fees - {referral_commission_amount:.6f} referral)")
 
         # STEP 7: UPDATE TIER FOR BOTH PLAYERS (volume-based auto-upgrade)
         from tiers import update_user_tier
