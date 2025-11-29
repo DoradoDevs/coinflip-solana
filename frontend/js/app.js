@@ -4,8 +4,8 @@
  */
 
 // API Configuration
-const API_BASE = window.location.origin;
-const API_URL = `${API_BASE}/api`;
+const API_BASE = 'https://api.coinflipvp.com';
+const API_URL = API_BASE;
 
 // Global state
 let wallet = null;
