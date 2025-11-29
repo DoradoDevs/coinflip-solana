@@ -35,7 +35,10 @@
       "Bash(icacls \"c:\\Users\\Clock\\.ssh\\volt_key\" /inheritance:r /grant:r \"%USERNAME%:R\")",
       "Bash(curl -X POST \"https://api.telegram.org/bot8118580040:AAF8leNlsAPgmzo6HiWw6isQls5aU9EvDsc/setWebhook?url=https://api.coinflipvp.com/telegram/webhook\")",
       "Bash(curl:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(python3:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
