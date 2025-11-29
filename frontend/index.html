@@ -45,11 +45,9 @@
                             <h3>1. Choose Your Side</h3>
                             <div class="side-selection">
                                 <button class="side-btn" data-side="heads" onclick="selectSide('heads')">
-                                    <span class="side-emoji">🪙</span>
                                     <span>HEADS</span>
                                 </button>
                                 <button class="side-btn" data-side="tails" onclick="selectSide('tails')">
-                                    <span class="side-emoji">🎯</span>
                                     <span>TAILS</span>
                                 </button>
                             </div>
@@ -98,14 +96,14 @@
 
                     <!-- Step 2: Deposit Instructions -->
                     <div id="step2" class="create-step" style="display: none;">
-                        <h2>📥 Deposit to Escrow</h2>
+                        <h2>Deposit to Escrow</h2>
 
                         <div class="escrow-info">
                             <p>Send exactly <strong id="depositAmount">-</strong> SOL to this escrow wallet:</p>
 
                             <div class="escrow-address-box">
                                 <code id="escrowAddress">-</code>
-                                <button class="copy-btn" onclick="copyEscrowAddress()">📋 Copy</button>
+                                <button class="copy-btn" onclick="copyEscrowAddress()">Copy</button>
                             </div>
 
                             <div class="qr-placeholder">
@@ -114,9 +112,9 @@
                         </div>
 
                         <div class="deposit-steps">
-                            <p>✅ Open your Solana wallet (Phantom, Solflare, etc.)</p>
-                            <p>✅ Send exactly <strong id="depositAmount2">-</strong> SOL</p>
-                            <p>✅ Paste transaction signature below</p>
+                            <p>1. Open your Solana wallet (Phantom, Solflare, etc.)</p>
+                            <p>2. Send exactly <strong id="depositAmount2">-</strong> SOL</p>
+                            <p>3. Paste transaction signature below</p>
                         </div>
 
                         <div class="tx-input-section">
@@ -125,7 +123,7 @@
                         </div>
 
                         <button id="verifyDepositBtn" class="btn btn-primary btn-large" onclick="verifyDeposit()">
-                            ✓ Verify Deposit & Create Wager
+                            Verify Deposit & Create Wager
                         </button>
 
                         <button class="btn btn-secondary" onclick="backToStep1()">← Back</button>
@@ -134,7 +132,7 @@
                     <!-- Step 3: Success -->
                     <div id="step3" class="create-step" style="display: none;">
                         <div class="success-content">
-                            <div class="success-icon">✅</div>
+                            <div class="success-icon">Success</div>
                             <h2>Wager Created!</h2>
                             <p>Your wager is now live and waiting for an opponent.</p>
 
@@ -153,7 +151,7 @@
                                 </div>
                             </div>
 
-                            <p class="waiting-text">⏳ Waiting for opponent to accept...</p>
+                            <p class="waiting-text">Waiting for opponent to accept...</p>
 
                             <button class="btn btn-primary" onclick="closeCreateModal()">Done</button>
                         </div>
@@ -168,7 +166,7 @@
 
                     <!-- Step 1: Confirm & Enter Wallet -->
                     <div id="acceptStep1" class="create-step">
-                        <h2>⚔️ Accept Wager</h2>
+                        <h2>Accept Wager</h2>
 
                         <div class="wager-to-accept">
                             <div class="accept-row">
@@ -203,14 +201,14 @@
 
                     <!-- Step 2: Deposit -->
                     <div id="acceptStep2" class="create-step" style="display: none;">
-                        <h2>📥 Deposit to Accept</h2>
+                        <h2>Deposit to Accept</h2>
 
                         <div class="escrow-info">
                             <p>Send exactly <strong id="acceptDepositAmount">-</strong> SOL to this escrow wallet:</p>
 
                             <div class="escrow-address-box">
                                 <code id="acceptEscrowAddress">-</code>
-                                <button class="copy-btn" onclick="copyAcceptEscrowAddress()">📋 Copy</button>
+                                <button class="copy-btn" onclick="copyAcceptEscrowAddress()">Copy</button>
                             </div>
                         </div>
 
@@ -220,7 +218,7 @@
                         </div>
 
                         <button id="verifyAcceptBtn" class="btn btn-primary btn-large" onclick="verifyAcceptDeposit()">
-                            ✓ Verify & Execute Coinflip!
+                            Verify & Execute Coinflip
                         </button>
 
                         <button class="btn btn-secondary" onclick="backToAcceptStep1()">← Back</button>
@@ -266,7 +264,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>🔒 Provably Fair • All results verifiable on Solana blockchain</p>
+            <p>Provably Fair - All results verifiable on Solana blockchain</p>
             <p class="footer-links">
                 <a href="https://t.me/sol_coinflip_bot" target="_blank">Telegram Bot</a> •
                 <a href="#" onclick="showFairnessInfo()">Fairness</a>

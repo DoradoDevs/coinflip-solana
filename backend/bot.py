@@ -110,16 +110,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await ensure_user(update)
 
     welcome_msg = (
-        "⚔️ *Welcome to Coinflip PVP!*\n\n"
+        "*Welcome to Coinflip PVP!*\n\n"
         "The fairest PVP coinflip platform on Solana.\n\n"
         "*How to Play:*\n"
-        "• ⚔️ *Create Wager*: Challenge other players\n"
-        "• 🎯 *Accept Wagers*: Join existing games\n\n"
+        "- *Create Wager*: Challenge other players\n"
+        "- *Accept Wagers*: Join existing games\n\n"
         "*Features:*\n"
-        "✅ Provably fair using Solana blockhash\n"
-        "✅ Instant payouts\n"
-        "✅ Only 2% platform fee\n"
-        "✅ Secure escrow wallets\n\n"
+        "- Provably fair using Solana blockhash\n"
+        "- Instant payouts\n"
+        "- Only 2% platform fee\n"
+        "- Secure escrow wallets\n\n"
         f"Your wallet: `{truncate_address(user.wallet_address)}`"
     )
 
@@ -133,7 +133,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
     help_msg = (
-        "❓ *Help & Information*\n\n"
+        "*Help & Information*\n\n"
         "*PVP Coinflip:*\n"
         "Create or accept wagers against other players.\n"
         "Winner takes 98% of the pot (2% platform fee).\n\n"
@@ -144,9 +144,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "4. Coin flips using Solana blockhash\n"
         "5. Winner gets paid instantly!\n\n"
         "*Wallet:*\n"
-        "• Deposit SOL to play\n"
-        "• Withdraw anytime\n"
-        "• Your keys are encrypted\n\n"
+        "- Deposit SOL to play\n"
+        "- Withdraw anytime\n"
+        "- Your keys are encrypted\n\n"
         "*Fair Play:*\n"
         "All flips use Solana blockhash for randomness.\n"
         "Every game can be verified on-chain!"
@@ -226,7 +226,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show main menu."""
     await update.callback_query.edit_message_text(
-        "🎲 *Solana Coinflip*\n\nChoose an option:",
+        "*Solana Coinflip*\n\nChoose an option:",
         parse_mode="Markdown",
         reply_markup=menus.main_menu()
     )
@@ -242,10 +242,8 @@ async def handle_side_selection(update: Update, context: ContextTypes.DEFAULT_TY
     session["side"] = side
     session["step"] = "choose_amount"
 
-    side_emoji = "🪙" if side == "heads" else "🎯"
-
     await update.callback_query.edit_message_text(
-        f"{side_emoji} *You chose {side.upper()}*\n\nSelect wager amount:",
+        f"*You chose {side.upper()}*\n\nSelect wager amount:",
         parse_mode="Markdown",
         reply_markup=menus.amount_menu()
     )
@@ -258,7 +256,7 @@ async def handle_amount_selection(update: Update, context: ContextTypes.DEFAULT_
 
     if amount_str == "custom":
         await update.callback_query.edit_message_text(
-            "💵 Enter custom amount in SOL (e.g. 0.5):",
+            "Enter custom amount in SOL (e.g. 0.5):",
             parse_mode="Markdown",
             reply_markup=menus.cancel_button()
         )
@@ -282,26 +280,25 @@ async def show_game_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     # Get current balance
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
 
-    side_emoji = "🪙" if side == "heads" else "🎯"
     total_required = amount + TRANSACTION_FEE
 
     potential_win = (amount * 2) * 0.98  # 2% fee
 
     msg = (
-        f"⚔️ *Create PVP Wager*\n\n"
-        f"{side_emoji} Side: *{side.upper()}*\n"
-        f"💰 Wager: *{format_sol(amount)} SOL*\n"
-        f"💳 Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n"
-        f"💎 Potential Win: *{format_sol(potential_win)} SOL*\n\n"
-        f"📊 Your Balance: `{format_sol(balance)} SOL`\n"
-        f"📊 Required: `{format_sol(total_required)} SOL`\n\n"
+        f"*Create PVP Wager*\n\n"
+        f"Side: *{side.upper()}*\n"
+        f"Wager: *{format_sol(amount)} SOL*\n"
+        f"Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n"
+        f"Potential Win: *{format_sol(potential_win)} SOL*\n\n"
+        f"Your Balance: `{format_sol(balance)} SOL`\n"
+        f"Required: `{format_sol(total_required)} SOL`\n\n"
     )
 
     if balance < total_required:
-        msg += "❌ *Insufficient balance!*\n\nPlease deposit SOL first."
+        msg += "*Insufficient balance!*\n\nPlease deposit SOL first."
         keyboard = [
-            [InlineKeyboardButton("📥 Deposit", callback_data="deposit")],
-            [InlineKeyboardButton("« Back", callback_data="back")],
+            [InlineKeyboardButton("Deposit", callback_data="deposit")],
+            [InlineKeyboardButton("Back", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
     else:
@@ -323,7 +320,7 @@ async def show_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
 
     msg = (
-        f"💰 *Your Wallet*\n\n"
+        f"*Your Wallet*\n\n"
         f"Address:\n`{user.wallet_address}`\n\n"
         f"Balance: *{format_sol(balance)} SOL*\n\n"
         f"Send SOL to your address to deposit.\n"
@@ -342,7 +339,7 @@ async def show_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await ensure_user(update)
 
     msg = (
-        f"📥 *Deposit SOL*\n\n"
+        f"*Deposit SOL*\n\n"
         f"Send SOL to your wallet address:\n\n"
         f"`{user.wallet_address}`\n\n"
         f"Deposits are instant!\n"
@@ -374,18 +371,18 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     win_rate = format_win_rate(user.games_played, user.games_won)
     net_profit = user.total_won - user.total_lost
 
-    profit_emoji = "📈" if net_profit >= 0 else "📉"
+    profit_sign = "+" if net_profit >= 0 else "-"
 
     msg = (
-        f"📊 *Your Statistics*\n\n"
-        f"💰 Balance: *{format_sol(balance)} SOL*\n\n"
-        f"🎮 Games Played: {user.games_played}\n"
-        f"🏆 Games Won: {user.games_won}\n"
-        f"📊 Win Rate: *{win_rate}*\n\n"
-        f"💎 Total Wagered: {format_sol(user.total_wagered)} SOL\n"
-        f"✅ Total Won: {format_sol(user.total_won)} SOL\n"
-        f"❌ Total Lost: {format_sol(user.total_lost)} SOL\n"
-        f"{profit_emoji} Net P/L: *{format_sol(abs(net_profit))} SOL*"
+        f"*Your Statistics*\n\n"
+        f"Balance: *{format_sol(balance)} SOL*\n\n"
+        f"Games Played: {user.games_played}\n"
+        f"Games Won: {user.games_won}\n"
+        f"Win Rate: *{win_rate}*\n\n"
+        f"Total Wagered: {format_sol(user.total_wagered)} SOL\n"
+        f"Total Won: {format_sol(user.total_won)} SOL\n"
+        f"Total Lost: {format_sol(user.total_lost)} SOL\n"
+        f"Net P/L: *{profit_sign}{format_sol(abs(net_profit))} SOL*"
     )
 
     await update.callback_query.edit_message_text(
@@ -403,17 +400,17 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     games = db.get_user_games(user.user_id, limit=10)
 
     if not games:
-        msg = "📜 *Game History*\n\nNo games yet. Start playing!"
+        msg = "*Game History*\n\nNo games yet. Start playing!"
     else:
-        msg = "📜 *Recent Games*\n\n"
+        msg = "*Recent Games*\n\n"
 
         for game in games[:5]:
             won = (game.winner_id == user.user_id)
-            result_emoji = "✅" if won else "❌"
+            result_text = "WIN" if won else "LOSS"
             game_type = "House" if game.game_type == GameType.HOUSE else "PVP"
 
             msg += (
-                f"{result_emoji} {game_type} - {format_sol(game.amount)} SOL\n"
+                f"[{result_text}] {game_type} - {format_sol(game.amount)} SOL\n"
                 f"   Result: {game.result.value.upper() if game.result else 'N/A'}\n\n"
             )
 
@@ -427,7 +424,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help from callback."""
     help_msg = (
-        "❓ *Help*\n\n"
+        "*Help*\n\n"
         "PVP coinflip on Solana.\n"
         "2% platform fee on winnings.\n"
         "All games provably fair!"
@@ -449,7 +446,7 @@ async def create_wager_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     session["step"] = "choose_side"
 
     await update.callback_query.edit_message_text(
-        "⚔️ *Create PVP Wager*\n\nChoose your side:",
+        "*Create PVP Wager*\n\nChoose your side:",
         parse_mode="Markdown",
         reply_markup=menus.coin_side_menu()
     )
@@ -471,7 +468,7 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
     if balance < total_required:
         await update.callback_query.edit_message_text(
-            f"❌ *Insufficient Balance*\n\n"
+            f"*Insufficient Balance*\n\n"
             f"Required: *{format_sol(total_required)} SOL*\n"
             f"({format_sol(amount)} wager + {format_sol(TRANSACTION_FEE)} fee)\n\n"
             f"Available: *{format_sol(balance)} SOL*\n\n"
@@ -482,9 +479,9 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await update.callback_query.edit_message_text(
-        "⚔️ *Creating wager...*\n\n"
-        "🔒 Generating secure escrow wallet...\n"
-        "💸 Collecting deposit...\n\n"
+        "*Creating wager...*\n\n"
+        "Generating secure escrow wallet...\n"
+        "Collecting deposit...\n\n"
         "Please wait...",
         parse_mode="Markdown"
     )
@@ -527,13 +524,12 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"Wager created: {wager_id} by user {user.user_id} - {amount} SOL on {side.value} (escrow: {escrow_address})")
 
         # Show success message
-        side_emoji = "🪙" if side == CoinSide.HEADS else "🎯"
         msg = (
-            f"✅ *Wager Created!*\n\n"
-            f"{side_emoji} Side: *{side.value.upper()}*\n"
-            f"💰 Amount: *{format_sol(amount)} SOL*\n"
-            f"💳 Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
-            f"🔒 Funds secured in escrow: `{truncate_address(escrow_address)}`\n\n"
+            f"*Wager Created!*\n\n"
+            f"Side: *{side.value.upper()}*\n"
+            f"Amount: *{format_sol(amount)} SOL*\n"
+            f"Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
+            f"Funds secured in escrow: `{truncate_address(escrow_address)}`\n\n"
             f"Your wager is now live!\n"
             f"Other players can accept it from the Open Wagers list.\n\n"
             f"You can view it in 'My Wagers' or cancel it anytime.\n"
@@ -541,9 +537,9 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
         keyboard = [
-            [InlineKeyboardButton("🎯 View Open Wagers", callback_data="open_wagers")],
-            [InlineKeyboardButton("🎮 My Wagers", callback_data="my_wagers")],
-            [InlineKeyboardButton("« Main Menu", callback_data="back")],
+            [InlineKeyboardButton("View Open Wagers", callback_data="open_wagers")],
+            [InlineKeyboardButton("My Wagers", callback_data="my_wagers")],
+            [InlineKeyboardButton("Main Menu", callback_data="back")],
         ]
 
         await update.callback_query.edit_message_text(
@@ -555,7 +551,7 @@ async def execute_create_wager(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.error(f"Create wager failed: {e}")
         await update.callback_query.edit_message_text(
-            f"❌ *Wager Creation Failed*\n\nError: {str(e)}\n\nPlease try again.",
+            f"*Wager Creation Failed*\n\nError: {str(e)}\n\nPlease try again.",
             parse_mode="Markdown",
             reply_markup=menus.main_menu()
         )
@@ -571,13 +567,13 @@ async def show_open_wagers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not other_wagers:
         msg = (
-            "🎯 *Open Wagers*\n\n"
+            "*Open Wagers*\n\n"
             "No open wagers available right now.\n\n"
             "Be the first to create one!"
         )
         keyboard = [
-            [InlineKeyboardButton("⚔️ Create Wager", callback_data="create_wager")],
-            [InlineKeyboardButton("« Back", callback_data="back")],
+            [InlineKeyboardButton("Create Wager", callback_data="create_wager")],
+            [InlineKeyboardButton("Back", callback_data="back")],
         ]
         await update.callback_query.edit_message_text(
             msg,
@@ -585,7 +581,7 @@ async def show_open_wagers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        msg = f"🎯 *Open Wagers*\n\n{len(other_wagers)} wager(s) available:\n\nTap to view details:"
+        msg = f"*Open Wagers*\n\n{len(other_wagers)} wager(s) available:\n\nTap to view details:"
         await update.callback_query.edit_message_text(
             msg,
             parse_mode="Markdown",
@@ -616,19 +612,17 @@ async def show_wager_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     fee = total_pot * 0.02
     payout = total_pot - fee
 
-    side_emoji = "🪙" if wager.creator_side == CoinSide.HEADS else "🎯"
     opponent_side = "TAILS" if wager.creator_side == CoinSide.HEADS else "HEADS"
-    opponent_emoji = "🎯" if wager.creator_side == CoinSide.HEADS else "🪙"
 
     msg = (
-        f"⚔️ *PVP Wager Details*\n\n"
+        f"*PVP Wager Details*\n\n"
         f"Created by: @{creator_name}\n\n"
-        f"{side_emoji} Creator's Side: *{wager.creator_side.value.upper()}*\n"
-        f"{opponent_emoji} Your Side: *{opponent_side}*\n\n"
-        f"💰 Wager Amount: *{format_sol(wager.amount)} SOL*\n"
-        f"💎 Total Pot: *{format_sol(total_pot)} SOL*\n"
-        f"📊 Fee (2%): {format_sol(fee)} SOL\n"
-        f"🏆 Winner Gets: *{format_sol(payout)} SOL*\n\n"
+        f"Creator's Side: *{wager.creator_side.value.upper()}*\n"
+        f"Your Side: *{opponent_side}*\n\n"
+        f"Wager Amount: *{format_sol(wager.amount)} SOL*\n"
+        f"Total Pot: *{format_sol(total_pot)} SOL*\n"
+        f"Fee (2%): {format_sol(fee)} SOL\n"
+        f"Winner Gets: *{format_sol(payout)} SOL*\n\n"
         f"Accept this wager?"
     )
 
@@ -673,9 +667,9 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         return
 
     await update.callback_query.edit_message_text(
-        "⚔️ *Accepting wager...*\n\n"
-        "🔒 Creating your escrow...\n"
-        "💸 Collecting deposit...\n\n"
+        "*Accepting wager...*\n\n"
+        "Creating your escrow...\n"
+        "Collecting deposit...\n\n"
         "Please wait...",
         parse_mode="Markdown"
     )
@@ -719,7 +713,7 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
 
         await update.callback_query.edit_message_text(
-            "⚔️ *Escrows secured!*\n\n🎲 Flipping coin...\n\nPlease wait...",
+            "*Escrows secured!*\n\nFlipping coin...\n\nPlease wait...",
             parse_mode="Markdown"
         )
 
@@ -771,14 +765,14 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         # Notify the creator that their wager was accepted (Telegram push notification)
         try:
             creator_msg = (
-                f"🔔 *Your Wager Was Accepted!*\n\n"
+                f"*Your Wager Was Accepted!*\n\n"
                 f"Someone just accepted your {format_sol(wager.amount)} SOL wager!\n"
                 f"Game is complete. "
             )
             if game.winner_id == creator.user_id:
-                creator_msg += f"🎉 You WON {format_sol(payout)} SOL!"
+                creator_msg += f"You WON {format_sol(payout)} SOL!"
             else:
-                creator_msg += f"😔 You lost {format_sol(wager.amount)} SOL."
+                creator_msg += f"You lost {format_sol(wager.amount)} SOL."
 
             await context.bot.send_message(
                 chat_id=creator.user_id,
@@ -799,7 +793,7 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         db.save_wager(wager)
 
         await update.callback_query.edit_message_text(
-            f"❌ *Wager Acceptance Failed*\n\nError: {str(e)}\n\nThe wager is still open.",
+            f"*Wager Acceptance Failed*\n\nError: {str(e)}\n\nThe wager is still open.",
             parse_mode="Markdown",
             reply_markup=menus.main_menu()
         )
@@ -807,32 +801,31 @@ async def accept_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
 
 async def show_pvp_result(update: Update, context: ContextTypes.DEFAULT_TYPE, game, wager, won: bool):
     """Show PVP game result."""
-    result_emoji = "🪙" if game.result == CoinSide.HEADS else "🎯"
     payout = (game.amount * 2) * 0.98
 
     if won:
         msg = (
-            f"🎉 *YOU WON THE PVP BATTLE!*\n\n"
-            f"{result_emoji} Result: *{game.result.value.upper()}*\n"
-            f"💰 Your Wager: {format_sol(game.amount)} SOL\n"
-            f"💎 Won: *{format_sol(payout)} SOL*\n\n"
+            f"*YOU WON THE PVP BATTLE!*\n\n"
+            f"Result: *{game.result.value.upper()}*\n"
+            f"Your Wager: {format_sol(game.amount)} SOL\n"
+            f"Won: *{format_sol(payout)} SOL*\n\n"
         )
         if game.payout_tx:
-            msg += f"📝 [View Transaction]({format_tx_link(game.payout_tx)})\n\n"
+            msg += f"[View Transaction]({format_tx_link(game.payout_tx)})\n\n"
     else:
         msg = (
-            f"😔 *YOU LOST*\n\n"
-            f"{result_emoji} Result: *{game.result.value.upper()}*\n"
-            f"💰 Lost: {format_sol(game.amount)} SOL\n\n"
+            f"*YOU LOST*\n\n"
+            f"Result: *{game.result.value.upper()}*\n"
+            f"Lost: {format_sol(game.amount)} SOL\n\n"
             f"Better luck next time!\n\n"
         )
 
-    msg += f"🔍 *Provably Fair*\nBlockhash: `{game.blockhash[:16]}...`\n\nPlay again?"
+    msg += f"*Provably Fair*\nBlockhash: `{game.blockhash[:16]}...`\n\nPlay again?"
 
     keyboard = [
-        [InlineKeyboardButton("⚔️ Create Wager", callback_data="create_wager")],
-        [InlineKeyboardButton("🎯 Open Wagers", callback_data="open_wagers")],
-        [InlineKeyboardButton("« Main Menu", callback_data="back")],
+        [InlineKeyboardButton("Create Wager", callback_data="create_wager")],
+        [InlineKeyboardButton("Open Wagers", callback_data="open_wagers")],
+        [InlineKeyboardButton("Main Menu", callback_data="back")],
     ]
 
     await update.callback_query.edit_message_text(
@@ -874,14 +867,14 @@ async def cancel_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
         db.save_wager(wager)
         logger.warning(f"[CANCEL] Wager {wager_id} has no escrow, just marking cancelled")
         await update.callback_query.edit_message_text(
-            f"✅ *Wager Cancelled*\n\nYour wager of {format_sol(wager.amount)} SOL has been cancelled.",
+            f"*Wager Cancelled*\n\nYour wager of {format_sol(wager.amount)} SOL has been cancelled.",
             parse_mode="Markdown",
             reply_markup=menus.main_menu()
         )
         return
 
     await update.callback_query.edit_message_text(
-        "❌ *Cancelling wager...*\n\n💸 Processing refund...\n\nPlease wait...",
+        "*Cancelling wager...*\n\nProcessing refund...\n\nPlease wait...",
         parse_mode="Markdown"
     )
 
@@ -915,13 +908,13 @@ async def cancel_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
 
         # Success message
         msg = (
-            f"✅ *Wager Cancelled*\n\n"
-            f"💰 Refunded: *{format_sol(wager.amount)} SOL*\n"
-            f"💳 Fee Kept: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
+            f"*Wager Cancelled*\n\n"
+            f"Refunded: *{format_sol(wager.amount)} SOL*\n"
+            f"Fee Kept: *{format_sol(TRANSACTION_FEE)} SOL*\n\n"
             f"Your wager has been cancelled and funds returned.\n\n"
         )
         if refund_tx:
-            msg += f"📝 [View Refund Transaction]({format_tx_link(refund_tx)})"
+            msg += f"[View Refund Transaction]({format_tx_link(refund_tx)})"
 
         await update.callback_query.edit_message_text(
             msg,
@@ -932,7 +925,7 @@ async def cancel_wager(update: Update, context: ContextTypes.DEFAULT_TYPE, data:
     except Exception as e:
         logger.error(f"Cancel wager failed: {e}")
         await update.callback_query.edit_message_text(
-            f"❌ *Cancellation Failed*\n\nError: {str(e)}\n\nPlease try again or contact support.",
+            f"*Cancellation Failed*\n\nError: {str(e)}\n\nPlease try again or contact support.",
             parse_mode="Markdown",
             reply_markup=menus.main_menu()
         )
@@ -948,24 +941,23 @@ async def show_my_wagers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not open_wagers:
         msg = (
-            "🎮 *My Wagers*\n\n"
+            "*My Wagers*\n\n"
             "You don't have any open wagers.\n\n"
             "Create one to challenge other players!"
         )
         keyboard = [
-            [InlineKeyboardButton("⚔️ Create Wager", callback_data="create_wager")],
-            [InlineKeyboardButton("« Back", callback_data="back")],
+            [InlineKeyboardButton("Create Wager", callback_data="create_wager")],
+            [InlineKeyboardButton("Back", callback_data="back")],
         ]
     else:
-        msg = f"🎮 *My Wagers*\n\n{len(open_wagers)} open wager(s):\n"
+        msg = f"*My Wagers*\n\n{len(open_wagers)} open wager(s):\n"
         keyboard = []
 
         for wager in open_wagers[:10]:
-            side_emoji = "🪙" if wager.creator_side == CoinSide.HEADS else "🎯"
-            text = f"{side_emoji} {format_sol(wager.amount)} SOL - {wager.creator_side.value.upper()}"
+            text = f"{format_sol(wager.amount)} SOL - {wager.creator_side.value.upper()}"
             keyboard.append([InlineKeyboardButton(text, callback_data=f"wager:{wager.wager_id}")])
 
-        keyboard.append([InlineKeyboardButton("« Back", callback_data="back")])
+        keyboard.append([InlineKeyboardButton("Back", callback_data="back")])
 
     await update.callback_query.edit_message_text(
         msg,
@@ -996,7 +988,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
 
     # Start bot
-    logger.info("✅ Coinflip Bot is ready!")
+    logger.info("Coinflip Bot is ready!")
     logger.info("Press Ctrl+C to stop")
     logger.info("="*50)
 
