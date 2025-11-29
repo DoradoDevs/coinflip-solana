@@ -20,12 +20,9 @@ def validate_payout_wallet_set(user: User) -> Tuple[bool, str]:
     """
     if not user.payout_wallet:
         return False, (
-            "⚠️ You must set a payout wallet before betting!\n\n"
-            "This is where your winnings will be sent.\n\n"
-            "📱 Telegram: Use /set_payout_wallet command\n"
-            "🌐 Web: Set payout wallet in settings\n\n"
-            "💡 Tip: This protects your funds - we can always return "
-            "your winnings to your payout wallet even if something goes wrong!"
+            "You must set a payout wallet before betting!\n\n"
+            "This is where your winnings will be sent.\n"
+            "Set your payout wallet in settings."
         )
 
     # Validate wallet format
@@ -37,10 +34,7 @@ def validate_payout_wallet_set(user: User) -> Tuple[bool, str]:
 
 
 def auto_set_payout_wallet(user: User) -> bool:
-    """Auto-set payout wallet if user has a wallet address.
-
-    For Telegram users: Use their custodial wallet
-    For Web users: Use their connected wallet
+    """Auto-set payout wallet if user has a connected wallet.
 
     Args:
         user: User object to update
@@ -51,13 +45,9 @@ def auto_set_payout_wallet(user: User) -> bool:
     if user.payout_wallet:
         return False  # Already set
 
-    if user.platform == "telegram" and user.wallet_address:
-        user.payout_wallet = user.wallet_address
-        logger.info(f"Auto-set payout wallet for Telegram user {user.user_id}: {user.wallet_address}")
-        return True
-    elif user.platform == "web" and user.connected_wallet:
+    if user.connected_wallet:
         user.payout_wallet = user.connected_wallet
-        logger.info(f"Auto-set payout wallet for Web user {user.user_id}: {user.connected_wallet}")
+        logger.info(f"Auto-set payout wallet for user {user.user_id}: {user.connected_wallet}")
         return True
 
     return False
@@ -77,12 +67,9 @@ def can_create_wager(user: User) -> Tuple[bool, str]:
     if not is_valid:
         return False, error_msg
 
-    # For Telegram users, check they have a custodial wallet
-    if user.platform == "telegram" and not user.wallet_address:
-        return False, (
-            "⚠️ No wallet found!\n\n"
-            "Use /start to create your wallet first."
-        )
+    # Check user has a connected wallet
+    if not user.connected_wallet:
+        return False, "No wallet connected. Please connect your wallet first."
 
     return True, ""
 

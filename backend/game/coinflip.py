@@ -87,8 +87,8 @@ async def play_house_game(
     """
     game_id = generate_game_id()
 
-    # Check if player has custodial wallet (Telegram) or connected wallet (Web)
-    player_wallet = player.wallet_address or player.connected_wallet
+    # Get player's connected wallet (Web non-custodial)
+    player_wallet = player.connected_wallet
     if not player_wallet:
         raise Exception("Player has no wallet")
 
@@ -111,30 +111,11 @@ async def play_house_game(
     )
 
     try:
-        # STEP 1: COLLECT WAGER + TRANSACTION FEE (REAL SOLANA MAINNET)
-        # For Telegram custodial: Transfer from player's wallet to house wallet
-        if player.platform == "telegram" and player.encrypted_secret:
-            from utils import decrypt_secret
-            import os
-            encryption_key = os.getenv("ENCRYPTION_KEY")
-            player_secret = decrypt_secret(player.encrypted_secret, encryption_key)
-
-            # Collect wager + transaction fee (REAL SOL TRANSFER ON MAINNET)
-            total_to_collect = amount + TRANSACTION_FEE
-            deposit_tx = await transfer_sol(
-                rpc_url,
-                player_secret,
-                get_house_wallet_address(house_wallet_secret),
-                total_to_collect
-            )
-            game.deposit_tx = deposit_tx
-            logger.info(f"[REAL MAINNET] Collected {total_to_collect} SOL from player ({amount} wager + {TRANSACTION_FEE} fee) (tx: {deposit_tx})")
-
-        # For Web users: Escrow verification happens in API layer before calling this function
+        # STEP 1: VERIFY DEPOSIT (Web non-custodial)
+        # Escrow verification happens in API layer before calling this function
         # The transaction signature is verified on-chain to ensure SOL was sent
-        elif player.platform == "web":
-            total_required = amount + TRANSACTION_FEE
-            logger.info(f"[REAL MAINNET] Web user deposit verified in API layer: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee)")
+        total_required = amount + TRANSACTION_FEE
+        logger.info(f"[REAL MAINNET] Web user deposit verified in API layer: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee)")
 
         # STEP 2: FLIP COIN
         # Get latest blockhash for provably fair randomness
@@ -182,22 +163,7 @@ async def play_house_game(
         else:
             # House wins - player's escrowed funds stay in house wallet
             game.winner_id = 0  # House
-
-            # Send all fees to treasury (game fee + transaction fee)
-            # House keeps the remaining wager
-            if player.platform == "telegram":
-                game_fee = amount * HOUSE_FEE_PCT
-                total_fees = game_fee + TRANSACTION_FEE
-                if total_fees > 0:
-                    fee_tx = await transfer_sol(
-                        rpc_url,
-                        house_wallet_secret,
-                        treasury_address,
-                        total_fees
-                    )
-                    game.fee_tx = fee_tx
-
-            logger.info(f"[REAL MAINNET] House won {amount} SOL, sent {total_fees} SOL in fees to treasury")
+            logger.info(f"[REAL MAINNET] House won {amount} SOL")
 
         # Mark game as completed
         game.status = GameStatus.COMPLETED
@@ -224,7 +190,7 @@ async def play_pvp_game(
 
     Args:
         rpc_url: Solana RPC URL
-        house_wallet_secret: House wallet secret (for Telegram custodial games)
+        house_wallet_secret: House wallet secret key
         treasury_address: Treasury wallet for fees
         player1: First player (wager creator)
         player2: Second player (wager acceptor)
@@ -236,9 +202,9 @@ async def play_pvp_game(
     """
     game_id = generate_game_id()
 
-    # Get player wallets
-    player1_wallet = player1.wallet_address or player1.connected_wallet
-    player2_wallet = player2.wallet_address or player2.connected_wallet
+    # Get player wallets (Web non-custodial)
+    player1_wallet = player1.connected_wallet
+    player2_wallet = player2.connected_wallet
 
     if not player1_wallet or not player2_wallet:
         raise Exception("One or both players have no wallet")
@@ -262,54 +228,11 @@ async def play_pvp_game(
     )
 
     try:
-        # STEP 1: COLLECT ESCROW FROM BOTH PLAYERS (REAL SOLANA MAINNET)
-        # Check both players have sufficient balance (wager + transaction fee)
-        total_required = amount + TRANSACTION_FEE
-        player1_balance = await get_sol_balance(rpc_url, player1_wallet)
-        player2_balance = await get_sol_balance(rpc_url, player2_wallet)
-
-        if player1_balance < total_required:
-            raise Exception(f"Player 1 insufficient balance. Required: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee), Available: {player1_balance} SOL")
-        if player2_balance < total_required:
-            raise Exception(f"Player 2 insufficient balance. Required: {total_required} SOL ({amount} wager + {TRANSACTION_FEE} fee), Available: {player2_balance} SOL")
-
-        # Collect from both Telegram users (custodial wallets) - REAL TRANSFERS
-        if player1.platform == "telegram" and player1.encrypted_secret:
-            from utils import decrypt_secret
-            import os
-            encryption_key = os.getenv("ENCRYPTION_KEY")
-            player1_secret = decrypt_secret(player1.encrypted_secret, encryption_key)
-
-            # Transfer player1's wager + fee to house wallet (REAL MAINNET)
-            await transfer_sol(
-                rpc_url,
-                player1_secret,
-                get_house_wallet_address(house_wallet_secret),
-                total_required
-            )
-            logger.info(f"[REAL MAINNET] Collected {total_required} SOL from player1 ({amount} wager + {TRANSACTION_FEE} fee)")
-
-        if player2.platform == "telegram" and player2.encrypted_secret:
-            from utils import decrypt_secret
-            import os
-            encryption_key = os.getenv("ENCRYPTION_KEY")
-            player2_secret = decrypt_secret(player2.encrypted_secret, encryption_key)
-
-            # Transfer player2's wager + fee to house wallet (REAL MAINNET)
-            await transfer_sol(
-                rpc_url,
-                player2_secret,
-                get_house_wallet_address(house_wallet_secret),
-                total_required
-            )
-            logger.info(f"[REAL MAINNET] Collected {total_required} SOL from player2 ({amount} wager + {TRANSACTION_FEE} fee)")
-
-        # For Web users: Escrow verification happens in API layer before calling this function
+        # STEP 1: VERIFY DEPOSITS (Web non-custodial)
+        # Escrow verification happens in API layer before calling this function
         # The transaction signatures are verified on-chain for both creator and acceptor
-        if player1.platform == "web":
-            logger.info(f"[REAL MAINNET] Web creator deposit verified in API layer: {total_required} SOL")
-        if player2.platform == "web":
-            logger.info(f"[REAL MAINNET] Web acceptor deposit verified in API layer: {total_required} SOL")
+        total_required = amount + TRANSACTION_FEE
+        logger.info(f"[REAL MAINNET] Web deposits verified in API layer: {total_required} SOL each")
 
         # STEP 2: FLIP COIN
         # Get latest blockhash for provably fair randomness
@@ -412,9 +335,9 @@ async def play_pvp_game_with_escrows(
     game_id = generate_game_id()
     encryption_key = os.getenv("ENCRYPTION_KEY")
 
-    # Get player wallets
-    creator_wallet = creator.wallet_address or creator.connected_wallet
-    acceptor_wallet = acceptor.wallet_address or acceptor.connected_wallet
+    # Get player wallets (Web non-custodial)
+    creator_wallet = creator.connected_wallet
+    acceptor_wallet = acceptor.connected_wallet
 
     if not creator_wallet or not acceptor_wallet:
         raise Exception("One or both players have no wallet")

@@ -30,15 +30,15 @@ class CoinSide(Enum):
 @dataclass
 class User:
     """User account."""
-    user_id: int  # Telegram user ID or web wallet pubkey hash
-    platform: str  # "telegram" or "web"
+    user_id: int  # Web wallet pubkey hash
+    platform: str = "web"  # Web-only
 
-    # For Telegram users (custodial)
+    # Connected wallet (non-custodial)
+    connected_wallet: Optional[str] = None
+
+    # Legacy fields (deprecated, kept for compatibility)
     wallet_address: Optional[str] = None
     encrypted_secret: Optional[str] = None
-
-    # For Web users (non-custodial)
-    connected_wallet: Optional[str] = None
 
     # Payout Configuration (REQUIRED before betting)
     payout_wallet: Optional[str] = None  # Where to send winnings (MUST BE SET)

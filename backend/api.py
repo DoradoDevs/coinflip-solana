@@ -1,6 +1,6 @@
 """
 FastAPI web backend for Solana Coinflip game.
-Supports both custodial (like Telegram) and wallet connect modes.
+Web-only with wallet connect (non-custodial).
 """
 import os
 import logging
@@ -38,7 +38,6 @@ from utils import (
     format_sol,
     format_win_rate,
 )
-from notifications import notify_wager_accepted
 from referrals import claim_referral_earnings, get_referral_escrow_balance, get_claimable_referral_balance, REFERRAL_ESCROW_RENT_MINIMUM
 
 # Load environment
@@ -327,11 +326,82 @@ async def verify_game(game_id: str):
     }
 
 
+class RecentGameResponse(BaseModel):
+    """Recent game with proof data for public display."""
+    game_id: str
+    game_type: str
+    player1_wallet: str
+    player2_wallet: Optional[str]
+    amount: float
+    result: str
+    winner_wallet: str
+    blockhash: str
+    payout_tx: Optional[str]
+    completed_at: str
+    # Proof verification data
+    proof: dict
+
+
 @app.get("/api/games/recent")
-async def get_recent_games(limit: int = 10) -> List[GameResponse]:
-    """Get recent games (all users)."""
-    # This would require a new DB method - simplified for now
-    return []
+async def get_recent_games(limit: int = 10) -> List[RecentGameResponse]:
+    """Get recent completed games with provably fair proof data.
+
+    Each game includes:
+    - Game details (players, amount, result)
+    - Proof data (blockhash, verification hash, expected result)
+    - Transaction signatures for on-chain verification
+    """
+    import hashlib
+
+    games = db.get_recent_games(limit=min(limit, 50))  # Cap at 50
+
+    results = []
+    for game in games:
+        if not game.blockhash or not game.result:
+            continue  # Skip games without proof data
+
+        # Get winner wallet
+        winner_wallet = ""
+        if game.winner_id:
+            winner_user = db.get_user(game.winner_id)
+            if winner_user:
+                winner_wallet = winner_user.connected_wallet or ""
+
+        # Generate proof data for verification
+        seed = f"{game.blockhash}{game.game_id}"
+        hash_digest = hashlib.sha256(seed.encode()).hexdigest()
+        first_byte = int(hash_digest[:2], 16)
+        expected_result = "heads" if first_byte % 2 == 0 else "tails"
+
+        proof = {
+            "blockhash": game.blockhash,
+            "game_id": game.game_id,
+            "seed": seed,
+            "hash": hash_digest,
+            "first_byte": first_byte,
+            "first_byte_hex": hash_digest[:2],
+            "is_even": first_byte % 2 == 0,
+            "expected_result": expected_result,
+            "actual_result": game.result.value,
+            "verified": expected_result == game.result.value,
+            "algorithm": "SHA-256(blockhash + game_id) first byte: even=HEADS, odd=TAILS"
+        }
+
+        results.append(RecentGameResponse(
+            game_id=game.game_id,
+            game_type=game.game_type.value,
+            player1_wallet=game.player1_wallet,
+            player2_wallet=game.player2_wallet,
+            amount=game.amount,
+            result=game.result.value,
+            winner_wallet=winner_wallet,
+            blockhash=game.blockhash,
+            payout_tx=game.payout_tx,
+            completed_at=game.completed_at.isoformat() if game.completed_at else "",
+            proof=proof
+        ))
+
+    return results
 
 
 # === WAGER ENDPOINTS (PVP) ===
@@ -372,7 +442,7 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
         # SECURITY: Create unique escrow wallet for creator
         # This function:
         # - Generates unique wallet
-        # - Collects deposit (Telegram) or verifies deposit (Web)
+        # - Verifies deposit on-chain
         # - Prevents signature reuse
         # - Returns encrypted secret for storage
         escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
@@ -436,7 +506,7 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
 
 @app.get("/api/wagers/open")
 async def get_open_wagers() -> List[WagerResponse]:
-    """Get all open wagers from both Telegram and Web users."""
+    """Get all open wagers."""
     wagers = db.get_open_wagers(limit=20)
 
     return [
@@ -569,16 +639,6 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
         db.save_user(user)
 
         logger.info(f"Web user {request.acceptor_wallet} accepted wager {request.wager_id}")
-
-        # Notify creator if they're a Telegram user (cross-platform notification)
-        if creator.platform == "telegram":
-            creator_won = (game.winner_id == creator.user_id)
-            await notify_wager_accepted(
-                creator.user_id,
-                wager.amount,
-                creator_won,
-                payout
-            )
 
         # Broadcast to WebSocket clients
         await manager.broadcast({

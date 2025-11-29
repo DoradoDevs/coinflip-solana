@@ -52,7 +52,7 @@ async def create_escrow_wallet(
         transaction_fee: Fixed transaction fee (0.025 SOL)
         user: User object (creator or acceptor)
         user_wallet: User's wallet address
-        deposit_tx_signature: Transaction signature (for Web) or None (for Telegram)
+        deposit_tx_signature: Transaction signature from Web user
         wager_id: Wager ID for tracking
         db: Database instance
 
@@ -71,27 +71,10 @@ async def create_escrow_wallet(
     # Encrypt secret for storage
     encrypted_secret = encrypt_secret(escrow_secret, encryption_key)
 
-    # COLLECT DEPOSIT based on platform
+    # COLLECT DEPOSIT (Web non-custodial)
     deposit_tx = None
 
-    if user.platform == "telegram" and user.encrypted_secret:
-        # TELEGRAM (Custodial): Transfer from user's wallet to escrow
-        logger.info(f"[ESCROW] Collecting {total_required} SOL from Telegram user {user.user_id}")
-
-        # Decrypt user's wallet secret
-        user_secret = decrypt_secret(user.encrypted_secret, encryption_key)
-
-        # Transfer to escrow wallet (REAL MAINNET TRANSFER)
-        deposit_tx = await transfer_sol(
-            rpc_url,
-            user_secret,
-            escrow_address,
-            total_required
-        )
-
-        logger.info(f"[REAL MAINNET] Collected {total_required} SOL from {user_wallet} → escrow {escrow_address} (tx: {deposit_tx})")
-
-    elif user.platform == "web":
+    if user.platform == "web":
         # WEB (Non-Custodial): Verify user sent to escrow
         if not deposit_tx_signature:
             raise Exception(

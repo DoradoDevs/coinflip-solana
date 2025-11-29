@@ -29,10 +29,14 @@ let acceptWagerState = {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     loadActiveWagers();
+    loadRecentGames();
     initializeEventListeners();
 
     // Refresh wagers every 15 seconds
     setInterval(loadActiveWagers, 15000);
+
+    // Refresh recent games every 30 seconds
+    setInterval(loadRecentGames, 30000);
 });
 
 /**
@@ -533,6 +537,133 @@ function showGameResult(result) {
 }
 
 // ============================================
+// RECENT GAMES
+// ============================================
+
+async function loadRecentGames() {
+    const container = document.getElementById('recentGames');
+
+    try {
+        const response = await fetch(`${API_BASE}/api/games/recent?limit=10`);
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch recent games');
+        }
+
+        const games = await response.json();
+
+        if (!games || games.length === 0) {
+            container.innerHTML = '<div class="no-games">No games played yet. Be the first!</div>';
+            return;
+        }
+
+        container.innerHTML = games.map(game => {
+            const winnerShort = game.winner_wallet ?
+                `${game.winner_wallet.slice(0, 4)}...${game.winner_wallet.slice(-4)}` : 'N/A';
+            const payout = (game.amount * 2 * 0.98).toFixed(4);
+            const timeAgo = getTimeAgo(new Date(game.completed_at));
+
+            return `
+                <div class="recent-game-card" onclick="showProofModal('${game.game_id}', ${JSON.stringify(game.proof).replace(/"/g, '&quot;')})">
+                    <div class="game-info">
+                        <span class="game-result ${game.result}">${game.result.toUpperCase()}</span>
+                        <span class="game-amount">${game.amount} SOL</span>
+                        <span class="game-winner">${winnerShort} won ${payout} SOL</span>
+                    </div>
+                    <div class="game-meta">
+                        <span class="game-time">${timeAgo}</span>
+                        <span class="verify-link">Verify</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (err) {
+        console.error('Error loading recent games:', err);
+        container.innerHTML = '<div class="no-games">Failed to load recent games.</div>';
+    }
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function showProofModal(gameId, proof) {
+    const modal = document.createElement('div');
+    modal.className = 'modal proof-modal';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-content proof-content">
+            <span class="modal-close" onclick="this.parentElement.parentElement.remove()">&times;</span>
+            <h2>Provably Fair Proof</h2>
+
+            <div class="proof-section">
+                <h3>Game Details</h3>
+                <div class="proof-row">
+                    <span>Game ID:</span>
+                    <code>${gameId}</code>
+                </div>
+                <div class="proof-row">
+                    <span>Result:</span>
+                    <span class="result-badge ${proof.actual_result}">${proof.actual_result.toUpperCase()}</span>
+                </div>
+                <div class="proof-row">
+                    <span>Verified:</span>
+                    <span class="${proof.verified ? 'verified' : 'failed'}">${proof.verified ? 'VERIFIED' : 'FAILED'}</span>
+                </div>
+            </div>
+
+            <div class="proof-section">
+                <h3>Verification Data</h3>
+                <div class="proof-row">
+                    <span>Blockhash:</span>
+                    <code class="small">${proof.blockhash}</code>
+                </div>
+                <div class="proof-row">
+                    <span>SHA-256 Hash:</span>
+                    <code class="small">${proof.hash}</code>
+                </div>
+                <div class="proof-row">
+                    <span>First Byte (hex):</span>
+                    <code>${proof.first_byte_hex}</code>
+                </div>
+                <div class="proof-row">
+                    <span>First Byte (decimal):</span>
+                    <code>${proof.first_byte}</code>
+                </div>
+                <div class="proof-row">
+                    <span>Is Even:</span>
+                    <span>${proof.is_even ? 'Yes (HEADS)' : 'No (TAILS)'}</span>
+                </div>
+            </div>
+
+            <div class="proof-section">
+                <h3>Algorithm</h3>
+                <p class="algorithm-text">${proof.algorithm}</p>
+                <p class="verify-note">You can verify this yourself:<br>
+                SHA256("${proof.blockhash}${gameId}") = ${proof.hash.slice(0, 20)}...</p>
+            </div>
+
+            <a href="https://solscan.io/tx/${proof.blockhash}" target="_blank" class="btn btn-secondary">
+                View on Solscan
+            </a>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on outside click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+// ============================================
 // FAIRNESS INFO
 // ============================================
 
@@ -542,12 +673,14 @@ function showFairnessInfo() {
 Our coinflip uses Solana's blockhash for true randomness:
 
 1. When you play, we get the latest Solana blockhash
-2. We combine: SHA-256(blockhash + wager_id)
-3. If the hash is even = HEADS, if odd = TAILS
+2. We combine: SHA-256(blockhash + game_id)
+3. If the first byte is even = HEADS, if odd = TAILS
 
 Why it's fair:
 - Blockhash is generated by Solana network
 - It's unpredictable and verifiable on-chain
+- 128 even values (0,2,4...254) = 50% HEADS
+- 128 odd values (1,3,5...255) = 50% TAILS
 - Every result can be verified!
 
 All funds are held in escrow until the flip is complete.`);

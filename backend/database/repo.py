@@ -268,6 +268,24 @@ class Database:
 
         return [self._row_to_game(row) for row in rows]
 
+    def get_recent_games(self, limit: int = 10) -> List[Game]:
+        """Get recent completed games (all users) for public display."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM games
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT ?
+        """, (limit,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_game(row) for row in rows]
+
     def _row_to_game(self, row: sqlite3.Row) -> Game:
         """Convert database row to Game object."""
         return Game(
