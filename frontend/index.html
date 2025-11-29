@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solana Coinflip - Provably Fair Gaming</title>
+    <title>Coinflip - PVP Solana Wagers</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,152 +11,254 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <h1>🎲 Solana Coinflip</h1>
-                <p class="tagline">Provably Fair • Instant Payouts • 2% Fee</p>
-            </div>
-            <div class="wallet-section">
-                <button id="connectWallet" class="btn btn-primary">
-                    Connect Wallet
-                </button>
-                <div id="walletInfo" class="wallet-info" style="display: none;">
-                    <span id="walletAddress" class="wallet-address"></span>
-                    <span id="walletBalance" class="wallet-balance"></span>
-                </div>
+                <h1>⚔️ Coinflip</h1>
+                <p class="tagline">PVP Solana Wagers • Provably Fair • 2% Fee</p>
             </div>
         </header>
 
-        <!-- Main Game Section -->
+        <!-- Main Content -->
         <main class="main-content">
-            <!-- Game Mode Selection -->
-            <section id="gameModeSection" class="game-mode-section">
-                <h2>Start Playing</h2>
-                <div class="game-modes">
-                    <div class="game-mode-card active" id="pvpMode">
-                        <div class="mode-icon">⚔️</div>
-                        <h3>PVP Coinflip</h3>
-                        <p>Challenge other players</p>
-                        <p class="mode-detail">Create or accept wagers • 2% fee</p>
-                    </div>
+            <!-- Active Wagers Section -->
+            <section class="wagers-section">
+                <h2>🔥 Active Wagers</h2>
+                <p class="section-subtitle">Accept a wager or create your own</p>
+
+                <div id="activeWagers" class="wagers-list">
+                    <div class="loading-wagers">Loading wagers...</div>
                 </div>
 
-                <!-- Active Wagers Section -->
-                <div class="active-wagers-section">
-                    <h3>🔥 Active Wagers</h3>
-                    <div id="activeWagers" class="wagers-list">
-                        <p class="no-wagers">No active wagers. Create one below!</p>
-                    </div>
-                </div>
-
-                <!-- Create Wager Button -->
-                <button id="createWagerBtn" class="btn btn-primary btn-large" style="margin-top: 20px;">
+                <button id="createWagerBtn" class="btn btn-primary btn-large">
                     ⚔️ Create New Wager
                 </button>
             </section>
 
-            <!-- Create PVP Wager -->
-            <section id="quickFlipSection" class="game-section" style="display: none;">
-                <button class="btn-back" id="backToModes">← Back</button>
+            <!-- Create Wager Modal -->
+            <div id="createWagerModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <span class="modal-close" onclick="closeCreateModal()">&times;</span>
 
-                <h2>⚔️ Create PVP Wager</h2>
+                    <!-- Step 1: Choose Side & Amount -->
+                    <div id="step1" class="create-step">
+                        <h2>Create PVP Wager</h2>
 
-                <!-- Step 1: Choose Side -->
-                <div id="chooseSide" class="game-step">
-                    <h3>Choose Your Side</h3>
-                    <div class="coin-selection">
-                        <button class="coin-btn" data-side="heads">
-                            <div class="coin heads">
-                                <span class="coin-emoji">🪙</span>
+                        <div class="step-section">
+                            <h3>1. Choose Your Side</h3>
+                            <div class="side-selection">
+                                <button class="side-btn" data-side="heads" onclick="selectSide('heads')">
+                                    <span class="side-emoji">🪙</span>
+                                    <span>HEADS</span>
+                                </button>
+                                <button class="side-btn" data-side="tails" onclick="selectSide('tails')">
+                                    <span class="side-emoji">🎯</span>
+                                    <span>TAILS</span>
+                                </button>
                             </div>
-                            <span>HEADS</span>
-                        </button>
-                        <button class="coin-btn" data-side="tails">
-                            <div class="coin tails">
-                                <span class="coin-emoji">🎯</span>
+                        </div>
+
+                        <div class="step-section">
+                            <h3>2. Wager Amount (SOL)</h3>
+                            <div class="amount-buttons">
+                                <button class="amount-btn" onclick="selectAmount(0.1)">0.1</button>
+                                <button class="amount-btn" onclick="selectAmount(0.5)">0.5</button>
+                                <button class="amount-btn" onclick="selectAmount(1)">1</button>
+                                <button class="amount-btn" onclick="selectAmount(5)">5</button>
                             </div>
-                            <span>TAILS</span>
+                            <div class="custom-amount">
+                                <input type="number" id="customAmount" placeholder="Custom amount" step="0.01" min="0.01">
+                                <button class="btn btn-secondary" onclick="useCustomAmount()">Use</button>
+                            </div>
+                        </div>
+
+                        <div class="step-section">
+                            <h3>3. Your Solana Address (to receive winnings)</h3>
+                            <input type="text" id="creatorWallet" class="wallet-input" placeholder="Your Solana wallet address">
+                        </div>
+
+                        <div id="wagerSummary" class="wager-summary" style="display: none;">
+                            <h3>Summary</h3>
+                            <div class="summary-row">
+                                <span>Side:</span>
+                                <span id="summarySide">-</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>Wager:</span>
+                                <span id="summaryAmount">-</span>
+                            </div>
+                            <div class="summary-row highlight">
+                                <span>Total to Deposit:</span>
+                                <span id="summaryTotal">-</span>
+                            </div>
+                            <p class="fee-note">Includes 0.025 SOL network fee</p>
+                        </div>
+
+                        <button id="continueBtn" class="btn btn-primary btn-large" onclick="continueToDeposit()" disabled>
+                            Continue →
                         </button>
                     </div>
-                </div>
 
-                <!-- Step 2: Choose Amount -->
-                <div id="chooseAmount" class="game-step" style="display: none;">
-                    <h3>Choose Wager Amount</h3>
-                    <div class="amount-selection">
-                        <button class="amount-btn" data-amount="0.1">0.1 SOL</button>
-                        <button class="amount-btn" data-amount="0.5">0.5 SOL</button>
-                        <button class="amount-btn" data-amount="1.0">1.0 SOL</button>
-                        <button class="amount-btn" data-amount="5.0">5.0 SOL</button>
-                    </div>
-                    <div class="custom-amount">
-                        <input type="number" id="customAmount" placeholder="Custom amount" step="0.01" min="0.01">
-                        <button class="btn btn-secondary" id="useCustomAmount">Use Custom</button>
-                    </div>
-                </div>
+                    <!-- Step 2: Deposit Instructions -->
+                    <div id="step2" class="create-step" style="display: none;">
+                        <h2>📥 Deposit to Escrow</h2>
 
-                <!-- Step 3: Confirm -->
-                <div id="confirmGame" class="game-step" style="display: none;">
-                    <h3>Confirm Your Flip</h3>
-                    <div class="game-summary">
-                        <div class="summary-item">
-                            <span class="label">Side:</span>
-                            <span id="selectedSide" class="value"></span>
+                        <div class="escrow-info">
+                            <p>Send exactly <strong id="depositAmount">-</strong> SOL to this escrow wallet:</p>
+
+                            <div class="escrow-address-box">
+                                <code id="escrowAddress">-</code>
+                                <button class="copy-btn" onclick="copyEscrowAddress()">📋 Copy</button>
+                            </div>
+
+                            <div class="qr-placeholder">
+                                <p>Scan with any Solana wallet</p>
+                            </div>
                         </div>
-                        <div class="summary-item">
-                            <span class="label">Wager:</span>
-                            <span id="selectedAmount" class="value"></span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="label">Potential Win:</span>
-                            <span id="potentialWin" class="value highlight"></span>
-                        </div>
-                    </div>
-                    <button class="btn btn-primary btn-large" id="playButton">
-                        🎲 Flip Coin
-                    </button>
-                </div>
 
-                <!-- Step 4: Flipping -->
-                <div id="flipping" class="game-step" style="display: none;">
-                    <h3>Flipping Coin...</h3>
-                    <div class="coin-flip-animation">
-                        <div class="coin flipping">
-                            <span class="coin-emoji">🪙</span>
+                        <div class="deposit-steps">
+                            <p>✅ Open your Solana wallet (Phantom, Solflare, etc.)</p>
+                            <p>✅ Send exactly <strong id="depositAmount2">-</strong> SOL</p>
+                            <p>✅ Paste transaction signature below</p>
+                        </div>
+
+                        <div class="tx-input-section">
+                            <label>Transaction Signature:</label>
+                            <input type="text" id="depositTxSignature" class="tx-input" placeholder="Paste your transaction signature here">
+                        </div>
+
+                        <button id="verifyDepositBtn" class="btn btn-primary btn-large" onclick="verifyDeposit()">
+                            ✓ Verify Deposit & Create Wager
+                        </button>
+
+                        <button class="btn btn-secondary" onclick="backToStep1()">← Back</button>
+                    </div>
+
+                    <!-- Step 3: Success -->
+                    <div id="step3" class="create-step" style="display: none;">
+                        <div class="success-content">
+                            <div class="success-icon">✅</div>
+                            <h2>Wager Created!</h2>
+                            <p>Your wager is now live and waiting for an opponent.</p>
+
+                            <div class="wager-details">
+                                <div class="detail-row">
+                                    <span>Wager ID:</span>
+                                    <span id="newWagerId">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>Amount:</span>
+                                    <span id="newWagerAmount">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>Your Side:</span>
+                                    <span id="newWagerSide">-</span>
+                                </div>
+                            </div>
+
+                            <p class="waiting-text">⏳ Waiting for opponent to accept...</p>
+
+                            <button class="btn btn-primary" onclick="closeCreateModal()">Done</button>
                         </div>
                     </div>
-                    <p class="flip-text">Using Solana blockhash for fair randomness</p>
                 </div>
+            </div>
 
-                <!-- Step 5: Result -->
-                <div id="gameResult" class="game-step" style="display: none;">
-                    <div id="resultContent">
-                        <!-- Populated by JavaScript -->
+            <!-- Accept Wager Modal -->
+            <div id="acceptWagerModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <span class="modal-close" onclick="closeAcceptModal()">&times;</span>
+
+                    <!-- Step 1: Confirm & Enter Wallet -->
+                    <div id="acceptStep1" class="create-step">
+                        <h2>⚔️ Accept Wager</h2>
+
+                        <div class="wager-to-accept">
+                            <div class="accept-row">
+                                <span>Wager Amount:</span>
+                                <span id="acceptAmount" class="highlight">-</span>
+                            </div>
+                            <div class="accept-row">
+                                <span>Creator's Side:</span>
+                                <span id="acceptCreatorSide">-</span>
+                            </div>
+                            <div class="accept-row">
+                                <span>Your Side:</span>
+                                <span id="acceptYourSide" class="highlight">-</span>
+                            </div>
+                            <div class="accept-row total">
+                                <span>Total to Deposit:</span>
+                                <span id="acceptTotal">-</span>
+                            </div>
+                        </div>
+
+                        <div class="step-section">
+                            <h3>Your Solana Address (to receive winnings)</h3>
+                            <input type="text" id="acceptorWallet" class="wallet-input" placeholder="Your Solana wallet address">
+                        </div>
+
+                        <button id="acceptContinueBtn" class="btn btn-primary btn-large" onclick="continueToAcceptDeposit()">
+                            Continue to Deposit →
+                        </button>
+
+                        <button class="btn btn-secondary" onclick="closeAcceptModal()">Cancel</button>
                     </div>
-                    <div class="result-actions">
-                        <button class="btn btn-primary" id="playAgain">Play Again</button>
-                        <button class="btn btn-secondary" id="backToModesFromResult">Main Menu</button>
+
+                    <!-- Step 2: Deposit -->
+                    <div id="acceptStep2" class="create-step" style="display: none;">
+                        <h2>📥 Deposit to Accept</h2>
+
+                        <div class="escrow-info">
+                            <p>Send exactly <strong id="acceptDepositAmount">-</strong> SOL to this escrow wallet:</p>
+
+                            <div class="escrow-address-box">
+                                <code id="acceptEscrowAddress">-</code>
+                                <button class="copy-btn" onclick="copyAcceptEscrowAddress()">📋 Copy</button>
+                            </div>
+                        </div>
+
+                        <div class="tx-input-section">
+                            <label>Transaction Signature:</label>
+                            <input type="text" id="acceptTxSignature" class="tx-input" placeholder="Paste your transaction signature here">
+                        </div>
+
+                        <button id="verifyAcceptBtn" class="btn btn-primary btn-large" onclick="verifyAcceptDeposit()">
+                            ✓ Verify & Execute Coinflip!
+                        </button>
+
+                        <button class="btn btn-secondary" onclick="backToAcceptStep1()">← Back</button>
+                    </div>
+
+                    <!-- Step 3: Result -->
+                    <div id="acceptStep3" class="create-step" style="display: none;">
+                        <div id="gameResultContent">
+                            <!-- Filled by JavaScript -->
+                        </div>
+                        <button class="btn btn-primary" onclick="closeAcceptModal()">Done</button>
                     </div>
                 </div>
-            </section>
+            </div>
 
-            <!-- Stats Section -->
-            <section id="statsSection" class="stats-section">
-                <h2>Your Statistics</h2>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">Games Played</div>
-                        <div class="stat-value" id="gamesPlayed">0</div>
+            <!-- How It Works -->
+            <section class="how-it-works">
+                <h2>How It Works</h2>
+                <div class="steps-grid">
+                    <div class="step-card">
+                        <div class="step-number">1</div>
+                        <h3>Create or Accept</h3>
+                        <p>Create a wager with your chosen side and amount, or accept an existing wager</p>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Win Rate</div>
-                        <div class="stat-value" id="winRate">0%</div>
+                    <div class="step-card">
+                        <div class="step-number">2</div>
+                        <h3>Deposit to Escrow</h3>
+                        <p>Send your wager + 0.025 SOL fee to a unique escrow wallet</p>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Total Wagered</div>
-                        <div class="stat-value" id="totalWagered">0 SOL</div>
+                    <div class="step-card">
+                        <div class="step-number">3</div>
+                        <h3>Coinflip!</h3>
+                        <p>When both deposits are verified, the coin flips using Solana blockhash</p>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Net P/L</div>
-                        <div class="stat-value" id="netPL">0 SOL</div>
+                    <div class="step-card">
+                        <div class="step-number">4</div>
+                        <h3>Winner Gets Paid</h3>
+                        <p>Winner receives 98% of both wagers instantly (2% platform fee)</p>
                     </div>
                 </div>
             </section>
@@ -166,25 +268,12 @@
         <footer class="footer">
             <p>🔒 Provably Fair • All results verifiable on Solana blockchain</p>
             <p class="footer-links">
-                <a href="https://solana.com" target="_blank">Solana</a> •
-                <a href="#" id="showHelp">Help</a> •
-                <a href="#" id="showFairness">Fairness</a>
+                <a href="https://t.me/coinflipvpbot" target="_blank">Telegram Bot</a> •
+                <a href="#" onclick="showFairnessInfo()">Fairness</a>
             </p>
         </footer>
     </div>
 
-    <!-- Modal for Help/Info -->
-    <div id="modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <span class="modal-close">&times;</span>
-            <div id="modalBody">
-                <!-- Populated by JavaScript -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Scripts -->
-    <script src="js/phantom.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
