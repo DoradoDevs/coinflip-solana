@@ -158,6 +158,10 @@ class AcceptWagerRequest(BaseModel):
     deposit_tx_signature: Optional[str] = None  # Required for Web users
 
 
+class VerifyDepositRequest(BaseModel):
+    tx_signature: str
+
+
 class CancelWagerRequest(BaseModel):
     wager_id: str
     creator_wallet: str
@@ -269,6 +273,8 @@ class WagerResponse(BaseModel):
     amount: float
     status: str
     created_at: str
+    escrow_wallet: Optional[str] = None  # Returned during creation for deposit
+    id: Optional[str] = None  # Alias for wager_id (frontend compatibility)
 
 
 # ===== UTILITY FUNCTIONS =====
@@ -840,7 +846,7 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
     """Create a PVP wager with isolated escrow wallet.
 
     SECURITY: Generates unique escrow wallet for creator's deposit.
-    Prevents single point of failure.
+    Step 1 of 2-step wager creation (generate escrow, then verify deposit).
 
     Rate limit: 20 requests per 60 seconds per IP
     """
@@ -852,6 +858,8 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
 
     try:
         import uuid
+        from game.solana_ops import generate_wallet
+        from utils import encrypt_secret
 
         user = ensure_web_user(request.creator_wallet)
 
@@ -868,62 +876,40 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
         # Generate wager ID
         wager_id = f"wager_{uuid.uuid4().hex[:12]}"
 
-        # SECURITY: Create unique escrow wallet for creator
-        # This function:
-        # - Generates unique wallet
-        # - Verifies deposit on-chain
-        # - Prevents signature reuse
-        # - Returns encrypted secret for storage
-        escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
-            RPC_URL,
-            ENCRYPTION_KEY,
-            request.amount,
-            TRANSACTION_FEE,
-            user,
-            request.creator_wallet,
-            request.deposit_tx_signature,
-            wager_id,
-            db
-        )
+        # Generate unique escrow wallet (step 1 - no deposit yet)
+        escrow_address, escrow_secret = generate_wallet()
+        encrypted_secret = encrypt_secret(escrow_secret, ENCRYPTION_KEY)
 
-        logger.info(f"[ESCROW] Created wager {wager_id} with escrow {escrow_address}")
+        logger.info(f"[ESCROW] Generated escrow {escrow_address} for pending wager {wager_id}")
 
-        # Create wager with escrow details
+        # Create wager with pending_deposit status
         wager = Wager(
             wager_id=wager_id,
             creator_id=user.user_id,
             creator_wallet=request.creator_wallet,
             creator_side=side,
             amount=request.amount,
-            status="open",
+            status="pending_deposit",  # Awaiting creator deposit
             creator_escrow_address=escrow_address,
             creator_escrow_secret=encrypted_secret,
-            creator_deposit_tx=deposit_tx,
+            creator_deposit_tx=None,  # Will be set after verification
         )
 
         # Save to database
         db.save_wager(wager)
 
-        logger.info(f"Wager created: {wager_id} by {request.creator_wallet} - {request.amount} SOL on {side.value} (escrow: {escrow_address})")
+        logger.info(f"Wager created (pending): {wager_id} by {request.creator_wallet} - {request.amount} SOL on {side.value}")
 
-        # Broadcast to WebSocket clients
-        await manager.broadcast({
-            "type": "wager_created",
-            "wager": {
-                "wager_id": wager_id,
-                "creator_wallet": request.creator_wallet,
-                "side": side.value,
-                "amount": request.amount
-            }
-        })
-
+        # Return response with escrow address for user to deposit to
         return WagerResponse(
             wager_id=wager.wager_id,
             creator_wallet=wager.creator_wallet,
             creator_side=wager.creator_side.value,
             amount=wager.amount,
             status=wager.status,
-            created_at=wager.created_at.isoformat()
+            created_at=wager.created_at.isoformat(),
+            escrow_wallet=escrow_address,  # User deposits to this address
+            id=wager.wager_id  # Frontend expects 'id' field
         )
 
     except HTTPException:
@@ -931,6 +917,98 @@ async def create_wager(request: CreateWagerRequest, http_request: Request) -> Wa
     except Exception as e:
         logger.error(f"Create wager failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create wager. Please try again.")
+
+
+@app.post("/api/wager/{wager_id}/verify-deposit")
+async def verify_wager_deposit(wager_id: str, request: VerifyDepositRequest, http_request: Request):
+    """Verify creator's deposit and activate the wager.
+
+    Step 2 of 2-step wager creation.
+    Verifies the deposit transaction on-chain and changes status to 'open'.
+    """
+    # SECURITY: Check emergency stop
+    check_emergency_stop()
+
+    # Rate limiting
+    check_rate_limit(http_request, "verify_deposit", max_requests=30, window_seconds=60)
+
+    try:
+        from game.solana_ops import verify_deposit_transaction
+        from database import UsedSignature
+
+        # Get the pending wager
+        wager = db.get_wager(wager_id)
+
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
+
+        if wager.status != "pending_deposit":
+            raise HTTPException(status_code=400, detail=f"Wager is not awaiting deposit (status: {wager.status})")
+
+        # SECURITY: Check if signature already used
+        if db.signature_already_used(request.tx_signature):
+            used_sig = db.get_used_signature(request.tx_signature)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Transaction signature already used for {used_sig.used_for}"
+            )
+
+        # Calculate expected amount
+        total_required = wager.amount + TRANSACTION_FEE
+
+        # Verify deposit on-chain
+        is_valid = await verify_deposit_transaction(
+            RPC_URL,
+            request.tx_signature,
+            wager.creator_wallet,  # sender
+            wager.creator_escrow_address,  # recipient (escrow)
+            total_required  # expected amount
+        )
+
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Deposit verification failed. Please ensure you sent exactly {total_required} SOL to {wager.creator_escrow_address}"
+            )
+
+        # Record used signature
+        used_sig = UsedSignature(
+            signature=request.tx_signature,
+            user_wallet=wager.creator_wallet,
+            used_for=f"wager_deposit_{wager_id}",
+        )
+        db.save_used_signature(used_sig)
+
+        # Update wager status to open
+        wager.status = "open"
+        wager.creator_deposit_tx = request.tx_signature
+        db.save_wager(wager)
+
+        logger.info(f"[DEPOSIT] Verified deposit for wager {wager_id}: {request.tx_signature}")
+
+        # Broadcast to WebSocket clients
+        await manager.broadcast({
+            "type": "wager_created",
+            "wager": {
+                "wager_id": wager_id,
+                "creator_wallet": wager.creator_wallet,
+                "side": wager.creator_side.value,
+                "amount": wager.amount
+            }
+        })
+
+        return {
+            "success": True,
+            "message": "Deposit verified! Your wager is now live.",
+            "wager_id": wager_id,
+            "status": "open"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Verify deposit failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to verify deposit. Please try again.")
 
 
 @app.get("/api/wagers/open")
@@ -1357,7 +1435,7 @@ async def admin_stats(http_request: Request):
             "total_users": user_count,
             "open_tickets": open_tickets,
             "total_tickets": total_tickets,
-            "admin_email": admin.email
+            "admin_username": admin.username
         }
     }
 

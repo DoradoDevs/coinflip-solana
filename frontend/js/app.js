@@ -108,8 +108,9 @@ function showAuthModal(form = 'login') {
 
     // Pre-fill referral code if available
     const savedRefCode = localStorage.getItem('referral_code');
-    if (savedRefCode) {
-        document.getElementById('registerReferral').value = savedRefCode;
+    const registerReferralEl = document.getElementById('registerReferral');
+    if (savedRefCode && registerReferralEl) {
+        registerReferralEl.value = savedRefCode;
     }
 }
 

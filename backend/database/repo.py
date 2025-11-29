@@ -585,6 +585,21 @@ class Database:
 
         return [self._row_to_wager(row) for row in rows]
 
+    def get_wager(self, wager_id: str) -> Optional[Wager]:
+        """Get a single wager by ID."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM wagers WHERE wager_id = ?", (wager_id,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return self._row_to_wager(row)
+        return None
+
     def get_user_wagers(self, user_id: int) -> List[Wager]:
         """Get user's wagers."""
         conn = sqlite3.connect(self.db_path)

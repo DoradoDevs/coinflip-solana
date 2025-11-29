@@ -621,7 +621,7 @@
                     document.getElementById('statUsers').textContent = data.stats.total_users;
                     document.getElementById('statOpenTickets').textContent = data.stats.open_tickets;
                     document.getElementById('statTotalTickets').textContent = data.stats.total_tickets;
-                    document.getElementById('adminEmail').textContent = data.stats.admin_email;
+                    document.getElementById('adminEmail').textContent = data.stats.admin_username;
                 }
             } catch (err) {
                 console.error('Failed to load stats:', err);
