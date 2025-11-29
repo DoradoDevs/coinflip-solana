@@ -232,7 +232,7 @@ async def refund_from_escrow(
     escrow_secret: str,
     escrow_address: str,
     creator_wallet: str,
-    house_wallet: str,
+    fee_destination: str,
     wager_amount: float,
     transaction_fee: float
 ) -> Tuple[str, str]:
@@ -240,7 +240,7 @@ async def refund_from_escrow(
 
     Fee Structure on Cancel:
     - Refund: wager_amount → creator's wallet
-    - Keep: transaction_fee → house wallet
+    - Keep: transaction_fee → treasury wallet
     - No 2% game fee (only on completed games)
 
     Args:
@@ -248,7 +248,7 @@ async def refund_from_escrow(
         escrow_secret: Decrypted escrow wallet secret
         escrow_address: Escrow wallet public address
         creator_wallet: Creator's main wallet address
-        house_wallet: House wallet address
+        fee_destination: Treasury wallet address for fee collection
         wager_amount: Wager amount to refund
         transaction_fee: Transaction fee to keep (0.025 SOL)
 
@@ -273,7 +273,7 @@ async def refund_from_escrow(
 
     logger.info(f"[REAL MAINNET] Refunded {wager_amount} SOL to creator (tx: {refund_tx})")
 
-    # Collect transaction fee + any remaining dust to house
+    # Collect transaction fee + any remaining dust to treasury
     remaining_balance = await get_sol_balance(rpc_url, escrow_address)
     logger.info(f"[ESCROW REFUND] Remaining balance: {remaining_balance} SOL")
 
@@ -281,18 +281,18 @@ async def refund_from_escrow(
         logger.info(f"[ESCROW REFUND] No fees to collect (balance ≤ rent minimum)")
         return refund_tx, None
 
-    # Transfer remaining to house (transaction fee + dust)
-    amount_to_house = remaining_balance - RENT_EXEMPT_SOL
-    logger.info(f"[ESCROW REFUND] Collecting {amount_to_house} SOL (fee + dust) to house")
+    # Transfer remaining to treasury (transaction fee + dust)
+    amount_to_treasury = remaining_balance - RENT_EXEMPT_SOL
+    logger.info(f"[ESCROW REFUND] Collecting {amount_to_treasury} SOL (fee + dust) to treasury")
 
     fee_tx = await transfer_sol(
         rpc_url,
         escrow_secret,
-        house_wallet,
-        amount_to_house
+        fee_destination,
+        amount_to_treasury
     )
 
-    logger.info(f"[REAL MAINNET] Collected {amount_to_house} SOL fee to house (tx: {fee_tx})")
+    logger.info(f"[REAL MAINNET] Collected {amount_to_treasury} SOL fee to treasury (tx: {fee_tx})")
 
     return refund_tx, fee_tx
 

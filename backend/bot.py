@@ -22,7 +22,6 @@ from telegram.ext import (
 # Import our modules
 from database import Database, User, GameType, CoinSide, Wager
 from game import (
-    play_house_game,
     play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
@@ -111,17 +110,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await ensure_user(update)
 
     welcome_msg = (
-        "🎲 *Welcome to Solana Coinflip!*\n\n"
-        "The most fair and transparent coinflip game on Solana.\n\n"
+        "⚔️ *Welcome to Coinflip PVP!*\n\n"
+        "The fairest PVP coinflip platform on Solana.\n\n"
         "*How to Play:*\n"
-        "• 🎲 *Quick Flip*: Play instantly against the house\n"
         "• ⚔️ *Create Wager*: Challenge other players\n"
         "• 🎯 *Accept Wagers*: Join existing games\n\n"
         "*Features:*\n"
         "✅ Provably fair using Solana blockhash\n"
         "✅ Instant payouts\n"
-        "✅ Only 2% house fee\n"
-        "✅ Secure custodial wallet\n\n"
+        "✅ Only 2% platform fee\n"
+        "✅ Secure escrow wallets\n\n"
         f"Your wallet: `{truncate_address(user.wallet_address)}`"
     )
 
@@ -136,22 +134,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
     help_msg = (
         "❓ *Help & Information*\n\n"
-        "*Game Modes:*\n"
-        "• *Quick Flip*: Instant game vs house, 2% fee on winnings\n"
-        "• *PVP Wager*: Create/accept player challenges, 2% fee on pot\n\n"
+        "*PVP Coinflip:*\n"
+        "Create or accept wagers against other players.\n"
+        "Winner takes 98% of the pot (2% platform fee).\n\n"
         "*How It Works:*\n"
-        "1. Choose heads or tails\n"
-        "2. Select your wager amount\n"
-        "3. Coin flips using Solana blockhash (provably fair)\n"
-        "4. Winner gets 2x wager minus 2% fee\n\n"
+        "1. Create a wager (choose side + amount)\n"
+        "2. Funds held in secure escrow\n"
+        "3. Another player accepts\n"
+        "4. Coin flips using Solana blockhash\n"
+        "5. Winner gets paid instantly!\n\n"
         "*Wallet:*\n"
         "• Deposit SOL to play\n"
         "• Withdraw anytime\n"
         "• Your keys are encrypted\n\n"
         "*Fair Play:*\n"
         "All flips use Solana blockhash for randomness.\n"
-        "Every game can be verified on-chain!\n\n"
-        "Need help? Contact @support"
+        "Every game can be verified on-chain!"
     )
 
     await update.message.reply_text(
@@ -176,17 +174,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back" or data == "main_menu":
         await show_main_menu(update, context)
 
-    elif data == "quick_flip":
-        await quick_flip_start(update, context)
-
     elif data.startswith("side:"):
         await handle_side_selection(update, context, data)
 
     elif data.startswith("amount:"):
         await handle_amount_selection(update, context, data)
-
-    elif data == "confirm_quick_flip":
-        await execute_quick_flip(update, context)
 
     elif data == "create_wager":
         await create_wager_start(update, context)
@@ -240,19 +232,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ===== QUICK FLIP (VS HOUSE) =====
-
-async def quick_flip_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start quick flip game."""
-    session = get_session(update.effective_user.id)
-    session["game_mode"] = "quick_flip"
-    session["step"] = "choose_side"
-
-    await update.callback_query.edit_message_text(
-        "🎲 *Quick Flip vs House*\n\nChoose your side:",
-        parse_mode="Markdown",
-        reply_markup=menus.coin_side_menu()
-    )
+# ===== SIDE AND AMOUNT SELECTION =====
 
 
 async def handle_side_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str):
@@ -292,31 +272,32 @@ async def handle_amount_selection(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def show_game_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show game confirmation."""
+    """Show PVP wager confirmation."""
     user = await ensure_user(update)
     session = get_session(user.user_id)
 
     side = session.get("side", "heads")
     amount = session.get("amount", 0.1)
-    game_mode = session.get("game_mode", "quick_flip")
 
     # Get current balance
     balance = await get_sol_balance(RPC_URL, user.wallet_address)
 
     side_emoji = "🪙" if side == "heads" else "🎯"
-    game_type_text = "Quick Flip (vs House)" if game_mode == "quick_flip" else "PVP Wager"
+    total_required = amount + TRANSACTION_FEE
 
     potential_win = (amount * 2) * 0.98  # 2% fee
 
     msg = (
-        f"🎲 *{game_type_text}*\n\n"
+        f"⚔️ *Create PVP Wager*\n\n"
         f"{side_emoji} Side: *{side.upper()}*\n"
         f"💰 Wager: *{format_sol(amount)} SOL*\n"
+        f"💳 Fee: *{format_sol(TRANSACTION_FEE)} SOL*\n"
         f"💎 Potential Win: *{format_sol(potential_win)} SOL*\n\n"
-        f"📊 Your Balance: `{format_sol(balance)} SOL`\n\n"
+        f"📊 Your Balance: `{format_sol(balance)} SOL`\n"
+        f"📊 Required: `{format_sol(total_required)} SOL`\n\n"
     )
 
-    if balance < amount:
+    if balance < total_required:
         msg += "❌ *Insufficient balance!*\n\nPlease deposit SOL first."
         keyboard = [
             [InlineKeyboardButton("📥 Deposit", callback_data="deposit")],
@@ -324,105 +305,13 @@ async def show_game_confirmation(update: Update, context: ContextTypes.DEFAULT_T
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
     else:
-        msg += "Ready to flip?"
-        reply_markup = menus.confirm_game_menu(game_mode)
+        msg += "Create this wager?"
+        reply_markup = menus.confirm_game_menu("create_wager")
 
     await update.callback_query.edit_message_text(
         msg,
         parse_mode="Markdown",
         reply_markup=reply_markup
-    )
-
-
-async def execute_quick_flip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Execute quick flip game."""
-    user = await ensure_user(update)
-    session = get_session(user.user_id)
-
-    side = CoinSide(session.get("side", "heads"))
-    amount = session.get("amount", 0.1)
-
-    await update.callback_query.edit_message_text(
-        "🎲 *Flipping coin...*\n\nPlease wait...",
-        parse_mode="Markdown"
-    )
-
-    try:
-        # Decrypt house wallet
-        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
-
-        # Play game
-        game = await play_house_game(
-            RPC_URL,
-            house_secret,
-            TREASURY_WALLET,
-            user,
-            side,
-            amount
-        )
-
-        # Save game
-        db.save_game(game)
-
-        # Update user stats
-        user.games_played += 1
-        user.total_wagered += amount
-
-        won = (game.winner_id == user.user_id)
-        if won:
-            user.games_won += 1
-            payout = (amount * 2) * 0.98
-            user.total_won += payout
-        else:
-            user.total_lost += amount
-
-        db.save_user(user)
-
-        # Show result
-        await show_game_result(update, context, game, won)
-
-    except Exception as e:
-        logger.error(f"Quick flip failed: {e}")
-        await update.callback_query.edit_message_text(
-            f"❌ *Game Failed*\n\nError: {str(e)}\n\nPlease try again.",
-            parse_mode="Markdown",
-            reply_markup=menus.main_menu()
-        )
-
-
-async def show_game_result(update: Update, context: ContextTypes.DEFAULT_TYPE, game, won: bool):
-    """Show game result."""
-    result_emoji = "🪙" if game.result.value == "heads" else "🎯"
-
-    if won:
-        payout = (game.amount * 2) * 0.98
-        msg = (
-            f"🎉 *YOU WON!*\n\n"
-            f"{result_emoji} Result: *{game.result.value.upper()}*\n"
-            f"💰 Wager: {format_sol(game.amount)} SOL\n"
-            f"💎 Won: *{format_sol(payout)} SOL*\n\n"
-        )
-        if game.payout_tx:
-            msg += f"📝 [View Transaction]({format_tx_link(game.payout_tx)})\n\n"
-    else:
-        msg = (
-            f"😔 *YOU LOST*\n\n"
-            f"{result_emoji} Result: *{game.result.value.upper()}*\n"
-            f"💰 Lost: {format_sol(game.amount)} SOL\n\n"
-        )
-
-    msg += f"🔍 *Provably Fair*\nBlockhash: `{game.blockhash[:16]}...`\n\nPlay again?"
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Play Again", callback_data="quick_flip")],
-        [InlineKeyboardButton("« Main Menu", callback_data="back")],
-    ]
-
-    await update.callback_query.edit_message_text(
-        msg,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        disable_web_page_preview=True
     )
 
 
@@ -539,9 +428,9 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help from callback."""
     help_msg = (
         "❓ *Help*\n\n"
-        "Provably fair coinflip on Solana.\n"
-        "2% house fee on all winnings.\n\n"
-        "Contact: @support"
+        "PVP coinflip on Solana.\n"
+        "2% platform fee on winnings.\n"
+        "All games provably fair!"
     )
 
     await update.callback_query.edit_message_text(

@@ -388,12 +388,12 @@ async def play_pvp_game_with_escrows(
 
     SECURITY: Each player's funds are in separate escrow wallets.
     Winner is paid from their own escrow.
-    All remaining funds from both escrows go to house.
+    All remaining funds (fees) from both escrows go to treasury.
 
     Args:
         rpc_url: Solana RPC URL
-        house_wallet_secret: House wallet secret (for receiving fees)
-        treasury_address: Treasury wallet for fees
+        house_wallet_secret: Wallet secret for referral commission payouts only
+        treasury_address: Treasury wallet for all game fees
         creator: Creator user object
         creator_side: Creator's chosen side
         creator_escrow_secret: Creator's escrow wallet secret (encrypted, will decrypt)

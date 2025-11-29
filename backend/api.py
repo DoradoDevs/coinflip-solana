@@ -17,7 +17,6 @@ from pydantic import BaseModel
 # Import our modules
 from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus, UsedSignature
 from game import (
-    play_house_game,
     play_pvp_game_with_escrows,
     generate_wallet,
     get_sol_balance,
@@ -31,7 +30,8 @@ from game import (
     refund_from_escrow,
     check_escrow_balance,
 )
-from game.coinflip import get_house_wallet_address
+# Note: HOUSE_WALLET_SECRET is used for referral commission payouts only
+# All game fees go directly to TREASURY_WALLET
 from utils import (
     encrypt_secret,
     decrypt_secret,
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 RPC_URL = os.getenv("RPC_URL")
-HOUSE_WALLET_SECRET = os.getenv("HOUSE_WALLET_SECRET")
+HOUSE_WALLET_SECRET = os.getenv("HOUSE_WALLET_SECRET")  # Used ONLY for referral commission payouts
 TREASURY_WALLET = os.getenv("TREASURY_WALLET")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
@@ -79,7 +79,7 @@ def check_rate_limit(request: Request, endpoint: str, max_requests: int, window_
 
     Args:
         request: FastAPI request object
-        endpoint: Endpoint identifier (e.g., "quick_flip")
+        endpoint: Endpoint identifier (e.g., "create_wager")
         max_requests: Maximum requests allowed in window
         window_seconds: Time window in seconds
 
@@ -130,13 +130,6 @@ app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
 class CreateUserRequest(BaseModel):
     wallet_address: str
-
-
-class QuickFlipRequest(BaseModel):
-    wallet_address: str
-    side: str  # "heads" or "tails"
-    amount: float
-    deposit_tx_signature: Optional[str] = None  # Required for Web users (Phantom/Solflare)
 
 
 class CreateWagerRequest(BaseModel):
@@ -285,136 +278,6 @@ async def get_balance(wallet_address: str):
 
 
 # === GAME ENDPOINTS ===
-
-@app.post("/api/game/quick-flip")
-async def quick_flip(request: QuickFlipRequest, http_request: Request) -> GameResponse:
-    """Play quick flip vs house.
-
-    For Web users: Must provide deposit_tx_signature proving they sent (wager + fee) to house wallet.
-
-    Rate limit: 10 requests per 60 seconds per IP
-    """
-    # SECURITY: Check emergency stop
-    check_emergency_stop()
-
-    # SECURITY: Rate limiting (10 games per minute max)
-    check_rate_limit(http_request, "quick_flip", max_requests=10, window_seconds=60)
-
-    try:
-        user = ensure_web_user(request.wallet_address)
-
-        # Validate side
-        if request.side not in ["heads", "tails"]:
-            raise HTTPException(status_code=400, detail="Invalid side. Must be 'heads' or 'tails'")
-
-        # Validate amount
-        if request.amount <= 0:
-            raise HTTPException(status_code=400, detail="Amount must be greater than 0")
-
-        # Decrypt house wallet
-        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
-        house_address = get_house_wallet_address(house_secret)
-
-        # ENFORCE ESCROW FOR WEB USERS
-        # Web users must send SOL first and provide transaction signature
-        if user.platform == "web":
-            if not request.deposit_tx_signature:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Web users must first send {request.amount + TRANSACTION_FEE} SOL ({request.amount} wager + {TRANSACTION_FEE} fee) to house wallet {house_address} and provide the transaction signature"
-                )
-
-            # Verify the deposit transaction on-chain
-            total_required = request.amount + TRANSACTION_FEE
-            is_valid = await verify_deposit_transaction(
-                RPC_URL,
-                request.deposit_tx_signature,
-                request.wallet_address,  # sender
-                house_address,  # recipient
-                total_required  # amount
-            )
-
-            if not is_valid:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid deposit transaction. Please send exactly {total_required} SOL ({request.amount} wager + {TRANSACTION_FEE} fee) to {house_address}"
-                )
-
-            # SECURITY: Check if signature already used (prevent replay attacks)
-            if db.signature_already_used(request.deposit_tx_signature):
-                used_sig = db.get_used_signature(request.deposit_tx_signature)
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Transaction signature already used. Each transaction can only be used once."
-                )
-
-            logger.info(f"[REAL MAINNET] Verified Web deposit: {total_required} SOL from {request.wallet_address} (tx: {request.deposit_tx_signature})")
-
-        side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
-
-        # Play game
-        game = await play_house_game(
-            RPC_URL,
-            house_secret,
-            TREASURY_WALLET,
-            user,
-            side,
-            request.amount
-        )
-
-        # Save game
-        db.save_game(game)
-
-        # Update user stats
-        user.games_played += 1
-        user.total_wagered += request.amount
-
-        won = (game.winner_id == user.user_id)
-        if won:
-            user.games_won += 1
-            payout = (request.amount * 2) * 0.98
-            user.total_won += payout
-        else:
-            user.total_lost += request.amount
-
-        db.save_user(user)
-
-        # SECURITY: Mark signature as used (prevent replay attacks)
-        if user.platform == "web" and request.deposit_tx_signature:
-            db.save_used_signature(UsedSignature(
-                signature=request.deposit_tx_signature,
-                user_wallet=request.wallet_address,
-                used_for=f"quick_flip_{game.game_id}",
-                used_at=datetime.utcnow()
-            ))
-            logger.info(f"[SECURITY] Marked signature {request.deposit_tx_signature[:16]}... as used")
-
-        # Return game result
-        winner_wallet = None
-        if game.winner_id == user.user_id:
-            winner_wallet = user.connected_wallet
-        elif game.winner_id == 0:
-            winner_wallet = "house"
-
-        return GameResponse(
-            game_id=game.game_id,
-            game_type=game.game_type.value,
-            player1_wallet=game.player1_wallet,
-            player2_wallet=game.player2_wallet,
-            amount=game.amount,
-            status=game.status.value,
-            result=game.result.value if game.result else None,
-            winner_wallet=winner_wallet,
-            blockhash=game.blockhash,
-            created_at=game.created_at.isoformat()
-        )
-
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions as-is
-    except Exception as e:
-        logger.error(f"Quick flip failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred processing your game. Please try again.")
-
 
 @app.get("/api/game/{game_id}")
 async def get_game(game_id: str) -> GameResponse:
@@ -803,22 +666,18 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
                 "wager_id": request.wager_id
             }
 
-        # Decrypt house wallet
-        house_secret = decrypt_secret(HOUSE_WALLET_SECRET, ENCRYPTION_KEY)
-        house_wallet = get_house_wallet_address(house_secret)
-
         # Decrypt escrow secret
         creator_escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
 
         logger.info(f"[CANCEL] Refunding wager {request.wager_id} from escrow {wager.creator_escrow_address}")
 
-        # Refund from escrow (returns wager, keeps 0.025 SOL fee)
+        # Refund from escrow (returns wager, sends 0.025 SOL fee to treasury)
         refund_tx, fee_tx = await refund_from_escrow(
             RPC_URL,
             creator_escrow_secret,
             wager.creator_escrow_address,
             request.creator_wallet,
-            house_wallet,
+            TREASURY_WALLET,  # Fee goes directly to treasury
             wager.amount,
             TRANSACTION_FEE
         )

@@ -5,10 +5,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def main_menu() -> InlineKeyboardMarkup:
-    """Main menu with all game options."""
+    """Main menu with PVP game options."""
     keyboard = [
-        [InlineKeyboardButton("🎲 Quick Flip (vs House)", callback_data="quick_flip")],
-        [InlineKeyboardButton("⚔️ Create Wager (PVP)", callback_data="create_wager")],
+        [InlineKeyboardButton("⚔️ Create Wager", callback_data="create_wager")],
         [InlineKeyboardButton("🎯 Open Wagers", callback_data="open_wagers")],
         [InlineKeyboardButton("💰 Wallet", callback_data="wallet")],
         [InlineKeyboardButton("📊 Stats", callback_data="stats")],
