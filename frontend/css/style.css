@@ -724,6 +724,23 @@ body {
     font-weight: 600;
 }
 
+/* On Chain Proof Button */
+.btn-proof {
+    display: block;
+    margin: 20px auto 0;
+    padding: 12px 30px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: var(--background);
+    font-weight: 700;
+    border: none;
+}
+
+.btn-proof:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(20, 241, 149, 0.3);
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+}
+
 /* Proof Modal */
 .proof-modal .proof-content {
     max-width: 550px;
@@ -805,6 +822,330 @@ body {
     color: var(--text-muted);
     font-family: monospace;
     word-break: break-all;
+}
+
+/* Fairness Modal */
+.fairness-content {
+    max-width: 550px;
+}
+
+.fairness-section {
+    margin-bottom: 20px;
+}
+
+.fairness-section h3 {
+    font-size: 1.1rem;
+    color: var(--primary);
+    margin-bottom: 12px;
+}
+
+.fairness-section p {
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+.fairness-section ol,
+.fairness-section ul {
+    margin-left: 20px;
+    color: var(--text-muted);
+}
+
+.fairness-section li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.fairness-section code {
+    background: var(--surface-light);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    color: var(--primary);
+}
+
+.highlight-box {
+    background: var(--surface-light);
+    border: 1px solid var(--primary);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.highlight-box h3 {
+    color: var(--text) !important;
+}
+
+.emphasis {
+    color: var(--primary) !important;
+    font-weight: 600;
+    margin-top: 15px !important;
+}
+
+/* Header Auth Buttons */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.auth-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.user-menu {
+    display: flex;
+    align-items: center;
+}
+
+.btn-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+}
+
+.btn-user:hover {
+    border-color: var(--primary);
+}
+
+.tier-badge {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: var(--background);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+/* Auth Modal */
+.auth-modal-content {
+    max-width: 400px;
+}
+
+.auth-form h2 {
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.form-input {
+    width: 100%;
+    background: var(--surface-light);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    color: var(--text);
+    font-size: 1rem;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.auth-switch {
+    text-align: center;
+    margin-top: 20px;
+    color: var(--text-muted);
+}
+
+.auth-switch a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.auth-switch a:hover {
+    text-decoration: underline;
+}
+
+.auth-recovery {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.auth-recovery a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+/* Profile Modal */
+.profile-modal-content {
+    max-width: 500px;
+}
+
+.profile-section {
+    background: var(--surface-light);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.profile-section h3 {
+    font-size: 1rem;
+    color: var(--text-muted);
+    margin-bottom: 15px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.tier-value {
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.tier-progress-bar {
+    background: var(--surface);
+    border-radius: 10px;
+    height: 12px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.tier-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+    border-radius: 10px;
+    transition: width 0.5s ease;
+}
+
+.tier-progress-text {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.referral-box {
+    text-align: center;
+}
+
+.referral-code-edit {
+    background: var(--surface);
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.referral-code-edit label {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.referral-code-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.referral-code-input-row .form-input {
+    flex: 1;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.referral-link-display {
+    margin-top: 10px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.referral-link-display a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.referral-link-display a:hover {
+    text-decoration: underline;
+}
+
+.referral-stats {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-bottom: 15px;
+}
+
+.referral-stat {
+    text-align: center;
+}
+
+.referral-rates-info {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border);
+}
+
+.referral-rate-current {
+    font-size: 1rem;
+    color: var(--text);
+    margin-bottom: 10px;
+}
+
+.referral-rate-current span {
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.tier-rates-table {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px 15px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.tier-rates-table span {
+    background: var(--surface);
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.logout-btn {
+    width: 100%;
+    margin-top: 10px;
 }
 
 /* How It Works */

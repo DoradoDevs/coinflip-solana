@@ -39,6 +39,19 @@ from utils import (
     format_win_rate,
 )
 from referrals import claim_referral_earnings, get_referral_escrow_balance, get_claimable_referral_balance, REFERRAL_ESCROW_RENT_MINIMUM
+from auth import (
+    hash_password,
+    verify_password,
+    create_session,
+    generate_referral_code,
+    validate_email,
+    validate_username,
+    validate_password,
+    validate_referral_code,
+    calculate_tier,
+    TIER_THRESHOLDS,
+    TIER_REFERRAL_RATES,
+)
 
 # Load environment
 load_dotenv()
@@ -153,6 +166,55 @@ class ClaimReferralRequest(BaseModel):
     user_wallet: str  # User's wallet address (for web users)
 
 
+# === AUTH MODELS ===
+
+class RegisterRequest(BaseModel):
+    """User registration request."""
+    email: str
+    password: str
+    username: str
+    referral_code: Optional[str] = None  # Optional referrer code
+
+
+class LoginRequest(BaseModel):
+    """User login request."""
+    email: str
+    password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    """Update user profile."""
+    display_name: Optional[str] = None
+    payout_wallet: Optional[str] = None
+
+
+class UpdateReferralCodeRequest(BaseModel):
+    """Update custom referral code."""
+    referral_code: str
+
+
+class ProfileResponse(BaseModel):
+    """User profile response."""
+    user_id: int
+    email: str
+    username: str
+    display_name: Optional[str]
+    payout_wallet: Optional[str]
+    games_played: int
+    games_won: int
+    total_wagered: float
+    total_won: float
+    total_lost: float
+    win_rate: str
+    tier: str
+    tier_progress: dict  # Progress to next tier
+    referral_code: str
+    total_referrals: int
+    pending_referral_earnings: float
+    total_referral_claimed: float
+    created_at: str
+
+
 class UserResponse(BaseModel):
     user_id: int
     wallet_address: Optional[str]
@@ -210,6 +272,64 @@ def ensure_web_user(wallet_address: str) -> User:
     return user
 
 
+# ===== HELPER: Get current user from session =====
+
+def get_session_token(request: Request) -> Optional[str]:
+    """Extract session token from Authorization header."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header[7:]
+    return None
+
+
+def get_current_user(request: Request) -> Optional[User]:
+    """Get current authenticated user from session."""
+    token = get_session_token(request)
+    if not token:
+        return None
+    return db.get_user_by_session(token)
+
+
+def require_auth(request: Request) -> User:
+    """Require authenticated user, raise 401 if not."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please login.")
+    return user
+
+
+def get_tier_progress(total_wagered: float, current_tier: str) -> dict:
+    """Calculate progress to next tier."""
+    tier_order = ["Starter", "Bronze", "Silver", "Gold", "Diamond"]
+    current_idx = tier_order.index(current_tier)
+
+    if current_idx >= len(tier_order) - 1:
+        # Already at max tier
+        return {
+            "current_tier": current_tier,
+            "next_tier": None,
+            "current_volume": total_wagered,
+            "volume_needed": 0,
+            "progress_percent": 100
+        }
+
+    next_tier = tier_order[current_idx + 1]
+    current_threshold = TIER_THRESHOLDS[current_tier]
+    next_threshold = TIER_THRESHOLDS[next_tier]
+
+    volume_in_tier = total_wagered - current_threshold
+    tier_range = next_threshold - current_threshold
+    progress = min(100, (volume_in_tier / tier_range) * 100) if tier_range > 0 else 0
+
+    return {
+        "current_tier": current_tier,
+        "next_tier": next_tier,
+        "current_volume": total_wagered,
+        "volume_needed": max(0, next_threshold - total_wagered),
+        "progress_percent": round(progress, 1)
+    }
+
+
 # ===== API ENDPOINTS =====
 
 @app.get("/")
@@ -219,6 +339,281 @@ async def root():
         "name": "Solana Coinflip API",
         "version": "1.0.0",
         "status": "online"
+    }
+
+
+# === AUTHENTICATION ENDPOINTS ===
+
+@app.post("/api/auth/register")
+async def register(request: RegisterRequest, http_request: Request):
+    """Register a new user account."""
+    # Rate limit: 5 registrations per hour per IP
+    check_rate_limit(http_request, "register", max_requests=5, window_seconds=3600)
+
+    # Validate email
+    if not validate_email(request.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    # Check if email already exists
+    if db.email_exists(request.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Validate username
+    valid, error = validate_username(request.username)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error)
+
+    # Check if username already taken
+    if db.username_exists(request.username):
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    # Validate password
+    valid, error = validate_password(request.password)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error)
+
+    # Handle referral code
+    referred_by = None
+    if request.referral_code:
+        referrer = db.get_user_by_referral_code(request.referral_code)
+        if referrer:
+            referred_by = referrer.user_id
+            logger.info(f"New user referred by user {referrer.user_id} (code: {request.referral_code})")
+
+    # Generate unique referral code for new user
+    user_referral_code = generate_referral_code()
+    while db.get_user_by_referral_code(user_referral_code):
+        user_referral_code = generate_referral_code()
+
+    # Create user
+    user = User(
+        user_id=None,  # Auto-generated
+        platform="web",
+        email=request.email.lower(),
+        password_hash=hash_password(request.password),
+        username=request.username.lower(),
+        display_name=request.username,
+        referral_code=user_referral_code,
+        referred_by=referred_by,
+    )
+
+    # Create session
+    session_token, session_expires = create_session(user)
+    user.session_token = session_token
+    user.session_expires = session_expires
+    user.last_login = datetime.utcnow()
+
+    # Save user
+    user_id = db.save_user(user)
+    user.user_id = user_id
+
+    # Update referrer's referral count
+    if referred_by:
+        referrer = db.get_user(referred_by)
+        if referrer:
+            referrer.total_referrals += 1
+            db.save_user(referrer)
+
+    logger.info(f"New user registered: {user.email} (ID: {user_id})")
+
+    return {
+        "success": True,
+        "message": "Registration successful",
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": user.email,
+            "username": user.username,
+            "referral_code": user.referral_code
+        }
+    }
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest, http_request: Request):
+    """Login to existing account."""
+    # Rate limit: 10 login attempts per minute per IP
+    check_rate_limit(http_request, "login", max_requests=10, window_seconds=60)
+
+    # Find user by email
+    user = db.get_user_by_email(request.email.lower())
+
+    if not user or not user.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Verify password
+    if not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Create new session
+    session_token, session_expires = create_session(user)
+    user.session_token = session_token
+    user.session_expires = session_expires
+    user.last_login = datetime.utcnow()
+    user.last_active = datetime.utcnow()
+
+    db.save_user(user)
+
+    logger.info(f"User logged in: {user.email}")
+
+    return {
+        "success": True,
+        "message": "Login successful",
+        "session_token": session_token,
+        "user": {
+            "user_id": user.user_id,
+            "email": user.email,
+            "username": user.username,
+            "display_name": user.display_name,
+            "tier": user.tier
+        }
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(http_request: Request):
+    """Logout and invalidate session."""
+    user = get_current_user(http_request)
+
+    if user:
+        user.session_token = None
+        user.session_expires = None
+        db.save_user(user)
+        logger.info(f"User logged out: {user.email}")
+
+    return {"success": True, "message": "Logged out successfully"}
+
+
+@app.get("/api/auth/me")
+async def get_me(http_request: Request) -> ProfileResponse:
+    """Get current authenticated user's profile."""
+    user = require_auth(http_request)
+
+    # Update tier based on volume
+    tier, fee_rate = calculate_tier(user.total_wagered)
+    if tier != user.tier:
+        user.tier = tier
+        user.tier_fee_rate = fee_rate
+        db.save_user(user)
+
+    tier_progress = get_tier_progress(user.total_wagered, user.tier)
+
+    return ProfileResponse(
+        user_id=user.user_id,
+        email=user.email,
+        username=user.username,
+        display_name=user.display_name,
+        payout_wallet=user.payout_wallet,
+        games_played=user.games_played,
+        games_won=user.games_won,
+        total_wagered=user.total_wagered,
+        total_won=user.total_won,
+        total_lost=user.total_lost,
+        win_rate=format_win_rate(user.games_played, user.games_won),
+        tier=user.tier,
+        tier_progress=tier_progress,
+        referral_code=user.referral_code or "",
+        total_referrals=user.total_referrals,
+        pending_referral_earnings=user.pending_referral_earnings,
+        total_referral_claimed=user.total_referral_claimed,
+        created_at=user.created_at.isoformat()
+    )
+
+
+@app.post("/api/profile/update")
+async def update_profile(request: UpdateProfileRequest, http_request: Request):
+    """Update user profile settings."""
+    user = require_auth(http_request)
+
+    if request.display_name is not None:
+        if len(request.display_name) > 50:
+            raise HTTPException(status_code=400, detail="Display name too long (max 50 chars)")
+        user.display_name = request.display_name
+
+    if request.payout_wallet is not None:
+        # Basic Solana address validation
+        if request.payout_wallet and (len(request.payout_wallet) < 32 or len(request.payout_wallet) > 44):
+            raise HTTPException(status_code=400, detail="Invalid Solana wallet address")
+        user.payout_wallet = request.payout_wallet
+
+    user.last_active = datetime.utcnow()
+    db.save_user(user)
+
+    return {
+        "success": True,
+        "message": "Profile updated successfully",
+        "display_name": user.display_name,
+        "payout_wallet": user.payout_wallet
+    }
+
+
+@app.post("/api/profile/referral-code")
+async def update_referral_code(request: UpdateReferralCodeRequest, http_request: Request):
+    """Update user's custom referral code (max 16 characters, alphanumeric)."""
+    user = require_auth(http_request)
+
+    # Validate referral code format
+    new_code = request.referral_code.upper()  # Store as uppercase
+    valid, error = validate_referral_code(new_code)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error)
+
+    # Check if code is already taken by another user
+    existing_user = db.get_user_by_referral_code(new_code)
+    if existing_user and existing_user.user_id != user.user_id:
+        raise HTTPException(status_code=400, detail="This referral code is already taken")
+
+    # Update user's referral code
+    old_code = user.referral_code
+    user.referral_code = new_code
+    db.save_user(user)
+
+    logger.info(f"User {user.user_id} updated referral code from {old_code} to {new_code}")
+
+    return {
+        "success": True,
+        "message": "Referral code updated successfully",
+        "referral_code": new_code,
+        "referral_link": f"https://coinflipvp.com/?ref={new_code}"
+    }
+
+
+@app.get("/api/profile/referrals")
+async def get_referral_stats(http_request: Request):
+    """Get user's referral statistics and earnings."""
+    user = require_auth(http_request)
+
+    # Get claimable balance if user has escrow
+    claimable = 0.0
+    if user.referral_payout_escrow_address:
+        try:
+            claimable = await get_claimable_referral_balance(user, RPC_URL)
+        except Exception as e:
+            logger.error(f"Failed to get referral balance: {e}")
+
+    # Get tier-based referral rate
+    tier_rate = TIER_REFERRAL_RATES.get(user.tier, 0.0)
+    rate_percent = int(tier_rate * 100) if tier_rate >= 0.01 else tier_rate * 100
+
+    return {
+        "success": True,
+        "referral_code": user.referral_code,
+        "referral_link": f"https://coinflipvp.com/?ref={user.referral_code}",
+        "total_referrals": user.total_referrals,
+        "pending_earnings": user.pending_referral_earnings,
+        "claimable_balance": claimable,
+        "total_claimed": user.total_referral_claimed,
+        "total_lifetime_earnings": user.referral_earnings,
+        "current_tier": user.tier,
+        "reward_rate_percent": rate_percent,
+        "reward_rate": f"{rate_percent}% of platform fees" if tier_rate > 0 else "Unlock at Bronze tier",
+        "tier_rates": {
+            "Starter": "0%",
+            "Bronze": "2.5%",
+            "Silver": "5%",
+            "Gold": "7.5%",
+            "Diamond": "10%"
+        }
     }
 
 

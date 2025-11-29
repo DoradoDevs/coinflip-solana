@@ -1,10 +1,14 @@
 /**
  * Coinflip - PVP Solana Wagers
- * Escrow-based system - No wallet connection required
+ * Escrow-based system with user authentication
  */
 
 // API Configuration
 const API_BASE = 'https://api.coinflipvp.com';
+
+// Auth state
+let currentUser = null;
+let sessionToken = localStorage.getItem('session_token');
 
 // Global state
 let createWagerState = {
@@ -28,6 +32,12 @@ let acceptWagerState = {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    // Check for existing session
+    checkSession();
+
+    // Check for referral code in URL
+    checkReferralCode();
+
     loadActiveWagers();
     loadRecentGames();
     initializeEventListeners();
@@ -38,6 +48,397 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh recent games every 30 seconds
     setInterval(loadRecentGames, 30000);
 });
+
+// ============================================
+// AUTHENTICATION
+// ============================================
+
+async function checkSession() {
+    if (!sessionToken) {
+        updateAuthUI(false);
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+
+        if (response.ok) {
+            currentUser = await response.json();
+            updateAuthUI(true);
+        } else {
+            // Session expired
+            localStorage.removeItem('session_token');
+            sessionToken = null;
+            updateAuthUI(false);
+        }
+    } catch (err) {
+        console.error('Session check failed:', err);
+        updateAuthUI(false);
+    }
+}
+
+function checkReferralCode() {
+    const params = new URLSearchParams(window.location.search);
+    const refCode = params.get('ref');
+    if (refCode) {
+        localStorage.setItem('referral_code', refCode);
+    }
+}
+
+function updateAuthUI(isLoggedIn) {
+    const authButtons = document.getElementById('authButtons');
+    const userMenu = document.getElementById('userMenu');
+
+    if (isLoggedIn && currentUser) {
+        authButtons.style.display = 'none';
+        userMenu.style.display = 'flex';
+        document.getElementById('headerUsername').textContent = currentUser.display_name || currentUser.username;
+        document.getElementById('headerTier').textContent = currentUser.tier;
+    } else {
+        authButtons.style.display = 'flex';
+        userMenu.style.display = 'none';
+    }
+}
+
+function showAuthModal(form = 'login') {
+    document.getElementById('authModal').style.display = 'flex';
+    switchAuthForm(form);
+
+    // Pre-fill referral code if available
+    const savedRefCode = localStorage.getItem('referral_code');
+    if (savedRefCode) {
+        document.getElementById('registerReferral').value = savedRefCode;
+    }
+}
+
+function closeAuthModal() {
+    document.getElementById('authModal').style.display = 'none';
+    // Clear form inputs
+    document.getElementById('loginEmail').value = '';
+    document.getElementById('loginPassword').value = '';
+    document.getElementById('registerEmail').value = '';
+    document.getElementById('registerUsername').value = '';
+    document.getElementById('registerPassword').value = '';
+}
+
+function switchAuthForm(form) {
+    document.getElementById('loginForm').style.display = form === 'login' ? 'block' : 'none';
+    document.getElementById('registerForm').style.display = form === 'register' ? 'block' : 'none';
+}
+
+async function handleLogin() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+
+    if (!email || !password) {
+        alert('Please enter email and password');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Login failed');
+        }
+
+        // Save session
+        sessionToken = data.session_token;
+        localStorage.setItem('session_token', sessionToken);
+
+        // Reload user data
+        await checkSession();
+
+        closeAuthModal();
+        alert('Welcome back!');
+
+    } catch (err) {
+        console.error('Login error:', err);
+        alert(err.message || 'Login failed. Please try again.');
+    }
+}
+
+async function handleRegister() {
+    const email = document.getElementById('registerEmail').value.trim();
+    const username = document.getElementById('registerUsername').value.trim();
+    const password = document.getElementById('registerPassword').value;
+    const referralCode = document.getElementById('registerReferral').value.trim();
+
+    if (!email || !username || !password) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email,
+                username,
+                password,
+                referral_code: referralCode || null
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Registration failed');
+        }
+
+        // Save session
+        sessionToken = data.session_token;
+        localStorage.setItem('session_token', sessionToken);
+
+        // Clear saved referral code
+        localStorage.removeItem('referral_code');
+
+        // Reload user data
+        await checkSession();
+
+        closeAuthModal();
+        alert('Account created! Welcome to Coinflip!');
+
+    } catch (err) {
+        console.error('Register error:', err);
+        alert(err.message || 'Registration failed. Please try again.');
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch(`${API_BASE}/api/auth/logout`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+    } catch (err) {
+        console.error('Logout error:', err);
+    }
+
+    // Clear local state
+    sessionToken = null;
+    currentUser = null;
+    localStorage.removeItem('session_token');
+
+    updateAuthUI(false);
+    closeProfileModal();
+    alert('Logged out successfully');
+}
+
+// ============================================
+// PROFILE
+// ============================================
+
+async function showProfileModal() {
+    if (!currentUser) {
+        showAuthModal('login');
+        return;
+    }
+
+    // Refresh user data
+    await checkSession();
+
+    if (!currentUser) return;
+
+    // Populate profile data
+    document.getElementById('profileGamesPlayed').textContent = currentUser.games_played;
+    document.getElementById('profileWinRate').textContent = currentUser.win_rate;
+    document.getElementById('profileVolume').textContent = currentUser.total_wagered.toFixed(2);
+
+    const profit = currentUser.total_won - currentUser.total_lost;
+    document.getElementById('profileProfit').textContent = profit >= 0 ? `+${profit.toFixed(2)}` : profit.toFixed(2);
+    document.getElementById('profileProfit').style.color = profit >= 0 ? 'var(--success)' : 'var(--danger)';
+
+    // Tier
+    document.getElementById('profileTier').textContent = currentUser.tier;
+    document.getElementById('tierProgressFill').style.width = `${currentUser.tier_progress.progress_percent}%`;
+
+    if (currentUser.tier_progress.next_tier) {
+        document.getElementById('tierProgressText').textContent =
+            `${currentUser.tier_progress.volume_needed.toFixed(2)} SOL to ${currentUser.tier_progress.next_tier}`;
+    } else {
+        document.getElementById('tierProgressText').textContent = 'Max tier reached!';
+    }
+
+    // Payout wallet
+    document.getElementById('profilePayoutWallet').value = currentUser.payout_wallet || '';
+
+    // Referrals
+    document.getElementById('customReferralCode').value = currentUser.referral_code;
+    document.getElementById('profileReferralLink').textContent = `coinflipvp.com/?ref=${currentUser.referral_code}`;
+    document.getElementById('profileReferralLink').href = `https://coinflipvp.com/?ref=${currentUser.referral_code}`;
+    document.getElementById('profileReferrals').textContent = currentUser.total_referrals;
+    document.getElementById('profilePendingEarnings').textContent = currentUser.pending_referral_earnings.toFixed(4);
+    document.getElementById('profileClaimedEarnings').textContent = currentUser.total_referral_claimed.toFixed(4);
+
+    // Tier-based referral rate
+    const tierRates = { 'Starter': '0%', 'Bronze': '2.5%', 'Silver': '5%', 'Gold': '7.5%', 'Diamond': '10%' };
+    document.getElementById('profileReferralRate').textContent = tierRates[currentUser.tier] || '0%';
+
+    document.getElementById('profileModal').style.display = 'flex';
+}
+
+function closeProfileModal() {
+    document.getElementById('profileModal').style.display = 'none';
+}
+
+async function updatePayoutWallet() {
+    const wallet = document.getElementById('profilePayoutWallet').value.trim();
+
+    if (wallet && (wallet.length < 32 || wallet.length > 44)) {
+        alert('Please enter a valid Solana wallet address');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/profile/update`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ payout_wallet: wallet })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to update wallet');
+        }
+
+        currentUser.payout_wallet = wallet;
+        alert('Payout wallet saved!');
+
+    } catch (err) {
+        console.error('Update wallet error:', err);
+        alert(err.message || 'Failed to update wallet');
+    }
+}
+
+function copyReferralCode() {
+    const code = document.getElementById('customReferralCode').value;
+    const link = `https://coinflipvp.com/?ref=${code}`;
+    navigator.clipboard.writeText(link).then(() => {
+        alert('Referral link copied!');
+    });
+}
+
+async function updateReferralCode() {
+    const newCode = document.getElementById('customReferralCode').value.trim().toUpperCase();
+
+    if (!newCode) {
+        alert('Please enter a referral code');
+        return;
+    }
+
+    if (newCode.length < 3) {
+        alert('Referral code must be at least 3 characters');
+        return;
+    }
+
+    if (newCode.length > 16) {
+        alert('Referral code must be 16 characters or less');
+        return;
+    }
+
+    if (!/^[A-Z0-9_]+$/i.test(newCode)) {
+        alert('Referral code can only contain letters, numbers, and underscores');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/profile/referral-code`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ referral_code: newCode })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to update referral code');
+        }
+
+        // Update local state
+        currentUser.referral_code = newCode;
+
+        // Update UI
+        document.getElementById('customReferralCode').value = newCode;
+        document.getElementById('profileReferralLink').textContent = `coinflipvp.com/?ref=${newCode}`;
+        document.getElementById('profileReferralLink').href = `https://coinflipvp.com/?ref=${newCode}`;
+
+        alert('Referral code updated!');
+
+    } catch (err) {
+        console.error('Update referral code error:', err);
+        alert(err.message || 'Failed to update referral code');
+    }
+}
+
+async function claimReferralEarnings() {
+    if (!currentUser || !currentUser.payout_wallet) {
+        alert('Please set your payout wallet first');
+        return;
+    }
+
+    const btn = document.getElementById('claimReferralBtn');
+    btn.disabled = true;
+    btn.textContent = 'Claiming...';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/referral/claim`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ user_wallet: currentUser.payout_wallet })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to claim earnings');
+        }
+
+        alert(`Claimed ${data.amount_claimed.toFixed(4)} SOL!`);
+
+        // Refresh profile
+        await showProfileModal();
+
+    } catch (err) {
+        console.error('Claim error:', err);
+        alert(err.message || 'Failed to claim earnings');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Claim Earnings';
+    }
+}
+
+// ============================================
+// AUTH CHECK FOR WAGERS
+// ============================================
+
+function requireLogin() {
+    if (!currentUser) {
+        alert('Please login or create an account to play');
+        showAuthModal('login');
+        return false;
+    }
+    return true;
+}
 
 /**
  * Initialize Event Listeners
@@ -95,6 +496,9 @@ async function loadActiveWagers() {
 // ============================================
 
 function openCreateModal() {
+    // REQUIRE LOGIN
+    if (!requireLogin()) return;
+
     // Reset state
     createWagerState = {
         selectedSide: null,
@@ -318,6 +722,9 @@ async function verifyDeposit() {
 // ============================================
 
 function openAcceptModal(wagerId, amount, creatorSide) {
+    // REQUIRE LOGIN
+    if (!requireLogin()) return;
+
     const yourSide = creatorSide === 'heads' ? 'tails' : 'heads';
     const totalDeposit = amount + 0.025;
 
@@ -552,12 +959,22 @@ async function loadRecentGames() {
 
         const games = await response.json();
 
-        if (!games || games.length === 0) {
-            container.innerHTML = '<div class="no-games">No games played yet. Be the first!</div>';
+        // Filter to only games from the last 24 hours
+        const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+        const recentGames = games.filter(game => {
+            const gameTime = new Date(game.completed_at).getTime();
+            return gameTime >= twentyFourHoursAgo;
+        });
+
+        if (!recentGames || recentGames.length === 0) {
+            container.innerHTML = '<div class="no-games">No games in the past 24h</div>';
             return;
         }
 
-        container.innerHTML = games.map(game => {
+        // Use filtered games
+        const gamesToDisplay = recentGames;
+
+        container.innerHTML = gamesToDisplay.map(game => {
             const winnerShort = game.winner_wallet ?
                 `${game.winner_wallet.slice(0, 4)}...${game.winner_wallet.slice(-4)}` : 'N/A';
             const payout = (game.amount * 2 * 0.98).toFixed(4);
@@ -668,20 +1085,62 @@ function showProofModal(gameId, proof) {
 // ============================================
 
 function showFairnessInfo() {
-    alert(`Provably Fair System
+    // Create a proper modal instead of alert
+    const modal = document.createElement('div');
+    modal.className = 'modal proof-modal';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-content fairness-content">
+            <span class="modal-close" onclick="this.parentElement.parentElement.remove()">&times;</span>
+            <h2>Provably Fair - Exact 50/50</h2>
 
-Our coinflip uses Solana's blockhash for true randomness:
+            <div class="fairness-section">
+                <h3>How It Works</h3>
+                <p>Our coinflip uses Solana's blockhash for true on-chain randomness:</p>
+                <ol>
+                    <li>When you play, we fetch the latest Solana blockhash</li>
+                    <li>We compute: <code>SHA-256(blockhash + game_id)</code></li>
+                    <li>First byte determines result: <strong>even = HEADS, odd = TAILS</strong></li>
+                </ol>
+            </div>
 
-1. When you play, we get the latest Solana blockhash
-2. We combine: SHA-256(blockhash + game_id)
-3. If the first byte is even = HEADS, if odd = TAILS
+            <div class="fairness-section highlight-box">
+                <h3>Mathematically Exact 50/50</h3>
+                <p>The SHA-256 first byte has 256 possible values (0-255):</p>
+                <ul>
+                    <li><strong>128 even values</strong> (0,2,4...254) = HEADS (50%)</li>
+                    <li><strong>128 odd values</strong> (1,3,5...255) = TAILS (50%)</li>
+                </ul>
+                <p class="emphasis">This is a mathematically perfect 50/50 split - no house edge on the flip itself.</p>
+            </div>
 
-Why it's fair:
-- Blockhash is generated by Solana network
-- It's unpredictable and verifiable on-chain
-- 128 even values (0,2,4...254) = 50% HEADS
-- 128 odd values (1,3,5...255) = 50% TAILS
-- Every result can be verified!
+            <div class="fairness-section">
+                <h3>Verify Any Game</h3>
+                <p>Every result can be independently verified:</p>
+                <ul>
+                    <li>Blockhash is from Solana blockchain (unpredictable, immutable)</li>
+                    <li>Game ID is generated before the blockhash is known</li>
+                    <li>Click any recent game to see full verification data</li>
+                </ul>
+            </div>
 
-All funds are held in escrow until the flip is complete.`);
+            <div class="fairness-section">
+                <h3>Security</h3>
+                <ul>
+                    <li>All funds held in unique escrow wallets until flip completes</li>
+                    <li>No single point of failure</li>
+                    <li>Winner paid automatically from escrow</li>
+                </ul>
+            </div>
+
+            <button class="btn btn-primary" onclick="this.parentElement.parentElement.remove()">Got It</button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Close on outside click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
 }

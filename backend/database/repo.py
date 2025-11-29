@@ -23,11 +23,14 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Users table
+        # Users table with authentication
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                platform TEXT NOT NULL,
+                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL DEFAULT 'web',
+                email TEXT UNIQUE,
+                password_hash TEXT,
+                email_verified INTEGER DEFAULT 0,
                 wallet_address TEXT,
                 encrypted_secret TEXT,
                 connected_wallet TEXT,
@@ -39,16 +42,21 @@ class Database:
                 total_lost REAL DEFAULT 0.0,
                 tier TEXT DEFAULT 'Starter',
                 tier_fee_rate REAL DEFAULT 0.02,
-                referral_code TEXT,
+                referral_code TEXT UNIQUE,
                 referred_by INTEGER,
                 referral_earnings REAL DEFAULT 0.0,
+                pending_referral_earnings REAL DEFAULT 0.0,
                 total_referrals INTEGER DEFAULT 0,
                 referral_payout_escrow_address TEXT,
                 referral_payout_escrow_secret TEXT,
                 total_referral_claimed REAL DEFAULT 0.0,
-                username TEXT,
+                username TEXT UNIQUE,
+                display_name TEXT,
                 created_at TEXT,
-                last_active TEXT
+                last_active TEXT,
+                last_login TEXT,
+                session_token TEXT,
+                session_expires TEXT
             )
         """)
 
@@ -135,6 +143,9 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_wagers_creator ON wagers(creator_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_used_signatures_wallet ON used_signatures(user_wallet)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_session ON users(session_token)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
 
         conn.commit()
         conn.close()
@@ -155,57 +166,191 @@ class Database:
         if not row:
             return None
 
+        return self._row_to_user(row)
+
+    def _row_to_user(self, row: sqlite3.Row) -> User:
+        """Convert database row to User object."""
+        keys = row.keys()
         return User(
             user_id=row["user_id"],
             platform=row["platform"],
+            email=row["email"] if "email" in keys else None,
+            password_hash=row["password_hash"] if "password_hash" in keys else None,
+            email_verified=bool(row["email_verified"]) if "email_verified" in keys else False,
             wallet_address=row["wallet_address"],
             encrypted_secret=row["encrypted_secret"],
             connected_wallet=row["connected_wallet"],
-            payout_wallet=row["payout_wallet"] if "payout_wallet" in row.keys() else None,
+            payout_wallet=row["payout_wallet"] if "payout_wallet" in keys else None,
             games_played=row["games_played"],
             games_won=row["games_won"],
             total_wagered=row["total_wagered"],
             total_won=row["total_won"],
             total_lost=row["total_lost"],
-            tier=row["tier"] if "tier" in row.keys() else "Starter",
-            tier_fee_rate=row["tier_fee_rate"] if "tier_fee_rate" in row.keys() else 0.02,
-            referral_code=row["referral_code"] if "referral_code" in row.keys() else None,
-            referred_by=row["referred_by"] if "referred_by" in row.keys() else None,
-            referral_earnings=row["referral_earnings"] if "referral_earnings" in row.keys() else 0.0,
-            total_referrals=row["total_referrals"] if "total_referrals" in row.keys() else 0,
-            referral_payout_escrow_address=row["referral_payout_escrow_address"] if "referral_payout_escrow_address" in row.keys() else None,
-            referral_payout_escrow_secret=row["referral_payout_escrow_secret"] if "referral_payout_escrow_secret" in row.keys() else None,
-            total_referral_claimed=row["total_referral_claimed"] if "total_referral_claimed" in row.keys() else 0.0,
-            username=row["username"],
+            tier=row["tier"] if "tier" in keys else "Starter",
+            tier_fee_rate=row["tier_fee_rate"] if "tier_fee_rate" in keys else 0.02,
+            referral_code=row["referral_code"] if "referral_code" in keys else None,
+            referred_by=row["referred_by"] if "referred_by" in keys else None,
+            referral_earnings=row["referral_earnings"] if "referral_earnings" in keys else 0.0,
+            pending_referral_earnings=row["pending_referral_earnings"] if "pending_referral_earnings" in keys else 0.0,
+            total_referrals=row["total_referrals"] if "total_referrals" in keys else 0,
+            referral_payout_escrow_address=row["referral_payout_escrow_address"] if "referral_payout_escrow_address" in keys else None,
+            referral_payout_escrow_secret=row["referral_payout_escrow_secret"] if "referral_payout_escrow_secret" in keys else None,
+            total_referral_claimed=row["total_referral_claimed"] if "total_referral_claimed" in keys else 0.0,
+            username=row["username"] if "username" in keys else None,
+            display_name=row["display_name"] if "display_name" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow(),
             last_active=datetime.fromisoformat(row["last_active"]) if row["last_active"] else datetime.utcnow(),
+            last_login=datetime.fromisoformat(row["last_login"]) if row.get("last_login") else None,
+            session_token=row["session_token"] if "session_token" in keys else None,
+            session_expires=datetime.fromisoformat(row["session_expires"]) if row.get("session_expires") else None,
         )
 
-    def save_user(self, user: User):
-        """Save or update user."""
+    def save_user(self, user: User) -> int:
+        """Save or update user. Returns user_id."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (
-                user_id, platform, wallet_address, encrypted_secret, connected_wallet, payout_wallet,
-                games_played, games_won, total_wagered, total_won, total_lost,
-                tier, tier_fee_rate, referral_code, referred_by,
-                referral_earnings, total_referrals,
-                referral_payout_escrow_address, referral_payout_escrow_secret, total_referral_claimed,
-                username, created_at, last_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            user.user_id, user.platform, user.wallet_address, user.encrypted_secret,
-            user.connected_wallet, user.payout_wallet, user.games_played, user.games_won, user.total_wagered,
-            user.total_won, user.total_lost, user.tier, user.tier_fee_rate,
-            user.referral_code, user.referred_by, user.referral_earnings, user.total_referrals,
-            user.referral_payout_escrow_address, user.referral_payout_escrow_secret, user.total_referral_claimed,
-            user.username, user.created_at.isoformat(), user.last_active.isoformat()
-        ))
+        if user.user_id:
+            # Update existing user
+            cursor.execute("""
+                UPDATE users SET
+                    platform=?, email=?, password_hash=?, email_verified=?,
+                    wallet_address=?, encrypted_secret=?, connected_wallet=?, payout_wallet=?,
+                    games_played=?, games_won=?, total_wagered=?, total_won=?, total_lost=?,
+                    tier=?, tier_fee_rate=?, referral_code=?, referred_by=?,
+                    referral_earnings=?, pending_referral_earnings=?, total_referrals=?,
+                    referral_payout_escrow_address=?, referral_payout_escrow_secret=?, total_referral_claimed=?,
+                    username=?, display_name=?, created_at=?, last_active=?, last_login=?,
+                    session_token=?, session_expires=?
+                WHERE user_id=?
+            """, (
+                user.platform, user.email, user.password_hash, int(user.email_verified),
+                user.wallet_address, user.encrypted_secret, user.connected_wallet, user.payout_wallet,
+                user.games_played, user.games_won, user.total_wagered, user.total_won, user.total_lost,
+                user.tier, user.tier_fee_rate, user.referral_code, user.referred_by,
+                user.referral_earnings, user.pending_referral_earnings, user.total_referrals,
+                user.referral_payout_escrow_address, user.referral_payout_escrow_secret, user.total_referral_claimed,
+                user.username, user.display_name, user.created_at.isoformat(), user.last_active.isoformat(),
+                user.last_login.isoformat() if user.last_login else None,
+                user.session_token, user.session_expires.isoformat() if user.session_expires else None,
+                user.user_id
+            ))
+            user_id = user.user_id
+        else:
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO users (
+                    platform, email, password_hash, email_verified,
+                    wallet_address, encrypted_secret, connected_wallet, payout_wallet,
+                    games_played, games_won, total_wagered, total_won, total_lost,
+                    tier, tier_fee_rate, referral_code, referred_by,
+                    referral_earnings, pending_referral_earnings, total_referrals,
+                    referral_payout_escrow_address, referral_payout_escrow_secret, total_referral_claimed,
+                    username, display_name, created_at, last_active, last_login,
+                    session_token, session_expires
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user.platform, user.email, user.password_hash, int(user.email_verified),
+                user.wallet_address, user.encrypted_secret, user.connected_wallet, user.payout_wallet,
+                user.games_played, user.games_won, user.total_wagered, user.total_won, user.total_lost,
+                user.tier, user.tier_fee_rate, user.referral_code, user.referred_by,
+                user.referral_earnings, user.pending_referral_earnings, user.total_referrals,
+                user.referral_payout_escrow_address, user.referral_payout_escrow_secret, user.total_referral_claimed,
+                user.username, user.display_name, user.created_at.isoformat(), user.last_active.isoformat(),
+                user.last_login.isoformat() if user.last_login else None,
+                user.session_token, user.session_expires.isoformat() if user.session_expires else None
+            ))
+            user_id = cursor.lastrowid
 
         conn.commit()
         conn.close()
+        return user_id
+
+    def get_user_by_email(self, email: str) -> Optional[User]:
+        """Get user by email address."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email.lower(),))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_user(row)
+
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Get user by username."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM users WHERE username = ?", (username.lower(),))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_user(row)
+
+    def get_user_by_session(self, session_token: str) -> Optional[User]:
+        """Get user by session token (validates expiration)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM users
+            WHERE session_token = ? AND session_expires > ?
+        """, (session_token, datetime.utcnow().isoformat()))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_user(row)
+
+    def get_user_by_referral_code(self, referral_code: str) -> Optional[User]:
+        """Get user by their referral code."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM users WHERE referral_code = ?", (referral_code.upper(),))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_user(row)
+
+    def email_exists(self, email: str) -> bool:
+        """Check if email is already registered."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email.lower(),))
+        result = cursor.fetchone()
+        conn.close()
+
+        return result is not None
+
+    def username_exists(self, username: str) -> bool:
+        """Check if username is already taken."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username.lower(),))
+        result = cursor.fetchone()
+        conn.close()
+
+        return result is not None
 
     # === Game Operations ===
 

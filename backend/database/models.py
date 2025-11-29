@@ -29,9 +29,14 @@ class CoinSide(Enum):
 
 @dataclass
 class User:
-    """User account."""
-    user_id: int  # Web wallet pubkey hash
+    """User account with authentication."""
+    user_id: int  # Auto-incrementing ID
     platform: str = "web"  # Web-only
+
+    # Authentication (Required for web users)
+    email: Optional[str] = None  # User's email (for login & recovery)
+    password_hash: Optional[str] = None  # Bcrypt hashed password
+    email_verified: bool = False  # Email verification status
 
     # Connected wallet (non-custodial)
     connected_wallet: Optional[str] = None
@@ -50,14 +55,16 @@ class User:
     total_won: float = 0.0
     total_lost: float = 0.0
 
-    # Tier System (volume-based fee discounts)
-    tier: str = "Starter"  # Starter, Bronze, Silver, Gold, Diamond
+    # Tier System (volume-based)
+    # Tiers: Starter (0 SOL), Bronze (10+ SOL), Silver (50+ SOL), Gold (200+ SOL), Diamond (500+ SOL)
+    tier: str = "Starter"
     tier_fee_rate: float = 0.02  # Current fee rate based on tier (2% default)
 
     # Referral System
-    referral_code: Optional[str] = None  # User's own referral code
+    referral_code: Optional[str] = None  # User's unique referral code
     referred_by: Optional[int] = None  # User ID of referrer
     referral_earnings: float = 0.0  # Total SOL earned from referrals (lifetime)
+    pending_referral_earnings: float = 0.0  # SOL pending to be claimed
     total_referrals: int = 0  # Number of users referred
 
     # Referral Payout Escrow (individual wallet per user for referral earnings)
@@ -67,8 +74,14 @@ class User:
 
     # Metadata
     username: Optional[str] = None
+    display_name: Optional[str] = None  # Display name (can be different from username)
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_active: datetime = field(default_factory=datetime.utcnow)
+    last_login: Optional[datetime] = None
+
+    # Session token (for API auth)
+    session_token: Optional[str] = None
+    session_expires: Optional[datetime] = None
 
 
 @dataclass
