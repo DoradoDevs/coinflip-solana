@@ -162,6 +162,7 @@ class Database:
 
         # Add missing columns to users table (for existing databases)
         user_migrations = [
+            # Auth columns
             ("email", "TEXT"),
             ("password_hash", "TEXT"),
             ("email_verified", "INTEGER DEFAULT 0"),
@@ -171,6 +172,19 @@ class Database:
             ("session_expires", "TEXT"),
             ("last_login", "TEXT"),
             ("is_admin", "INTEGER DEFAULT 0"),
+            # Profile columns
+            ("payout_wallet", "TEXT"),
+            ("tier", "TEXT DEFAULT 'Starter'"),
+            ("tier_fee_rate", "REAL DEFAULT 0.02"),
+            # Referral columns
+            ("referral_code", "TEXT"),
+            ("referred_by", "INTEGER"),
+            ("referral_earnings", "REAL DEFAULT 0.0"),
+            ("pending_referral_earnings", "REAL DEFAULT 0.0"),
+            ("total_referrals", "INTEGER DEFAULT 0"),
+            ("referral_payout_escrow_address", "TEXT"),
+            ("referral_payout_escrow_secret", "TEXT"),
+            ("total_referral_claimed", "REAL DEFAULT 0.0"),
         ]
 
         for col_name, col_type in user_migrations:
