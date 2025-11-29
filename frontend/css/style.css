@@ -52,6 +52,20 @@ body {
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+/* Crossed Swords Icon - Real metallic look */
+.swords-icon {
+    display: inline-block;
+    width: 48px;
+    height: 48px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='blade' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23E8E8E8'/%3E%3Cstop offset='50%25' style='stop-color:%23FFFFFF'/%3E%3Cstop offset='100%25' style='stop-color:%23C0C0C0'/%3E%3C/linearGradient%3E%3ClinearGradient id='handle' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%238B4513'/%3E%3Cstop offset='100%25' style='stop-color:%23654321'/%3E%3C/linearGradient%3E%3ClinearGradient id='guard' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23FFD700'/%3E%3Cstop offset='100%25' style='stop-color:%23DAA520'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg transform='rotate(-45 32 32)'%3E%3Crect x='30' y='8' width='4' height='36' fill='url(%23blade)' rx='1'/%3E%3Crect x='30' y='44' width='4' height='12' fill='url(%23handle)' rx='1'/%3E%3Crect x='24' y='42' width='16' height='4' fill='url(%23guard)' rx='2'/%3E%3C/g%3E%3Cg transform='rotate(45 32 32)'%3E%3Crect x='30' y='8' width='4' height='36' fill='url(%23blade)' rx='1'/%3E%3Crect x='30' y='44' width='4' height='12' fill='url(%23handle)' rx='1'/%3E%3Crect x='24' y='42' width='16' height='4' fill='url(%23guard)' rx='2'/%3E%3C/g%3E%3C/svg%3E") no-repeat center center;
+    background-size: contain;
+    flex-shrink: 0;
 }
 
 .tagline {
