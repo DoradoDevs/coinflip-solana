@@ -4,7 +4,9 @@
       "Bash(test:*)",
       "Bash(python setup_env.py:*)",
       "Bash(python:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []

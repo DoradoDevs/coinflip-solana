@@ -472,56 +472,119 @@ async def play_pvp_game_with_escrows(
             loser_escrow_address = creator_escrow_address
             game.winner_id = acceptor.user_id
 
-        # STEP 3: CALCULATE PAYOUT
-        # Pot = wager × 2
-        # Game fee = pot × 2%
-        # Payout = pot - game_fee (98% of pot)
-        total_pot = amount * 2
-        game_fee = total_pot * HOUSE_FEE_PCT
-        payout = total_pot - game_fee
+        # STEP 3: CALCULATE PAYOUT (TIER-BASED FEES)
+        # Use winner's tier fee rate for calculation
+        # - Winner's tier determines fee discount
+        # - Winner gets: (100% - fee_rate) from both escrows
+        # - Treasury gets: fee_rate from both escrows + tx fees
+        # - Loser gets: Nothing
+        winner_fee_rate = winner.tier_fee_rate  # e.g., 0.019 for Bronze, 0.015 for Diamond
 
-        logger.info(f"[ESCROW GAME] Pot: {total_pot} SOL, Game fee: {game_fee} SOL, Payout: {payout} SOL")
+        payout_per_escrow = amount * (1 - winner_fee_rate)  # (100% - fee%) from each escrow
+        total_payout = payout_per_escrow * 2  # Winner gets from both escrows
+        fee_per_escrow = amount * winner_fee_rate  # Fee from each escrow
+        total_fees = fee_per_escrow * 2 + (TRANSACTION_FEE * 2)  # Fees + tx costs
 
-        # STEP 4: PAY WINNER FROM WINNER'S ESCROW
-        payout_tx = await payout_from_escrow(
+        logger.info(f"[ESCROW GAME] Winner tier: {winner.tier} (fee rate: {winner_fee_rate*100:.1f}%)")
+        logger.info(f"[ESCROW GAME] Total payout to winner: {total_payout:.6f} SOL ({payout_per_escrow:.6f} from each escrow)")
+        logger.info(f"[ESCROW GAME] Total fees to treasury: {total_fees:.6f} SOL ({fee_per_escrow:.6f} + {TRANSACTION_FEE} from each escrow)")
+
+        # STEP 4: PAY WINNER FROM BOTH ESCROWS
+        # Send 98% of bet from winner's own escrow
+        winner_payout_tx = await payout_from_escrow(
             rpc_url,
             winner_escrow_secret,
             winner_wallet,
-            payout
+            payout_per_escrow
         )
-        game.payout_tx = payout_tx
 
-        logger.info(f"[ESCROW GAME] Paid winner {payout} SOL (tx: {payout_tx})")
+        # Send 98% of bet from loser's escrow
+        loser_payout_tx = await payout_from_escrow(
+            rpc_url,
+            loser_escrow_secret,
+            winner_wallet,
+            payout_per_escrow
+        )
 
-        # STEP 5: COLLECT FEES FROM BOTH ESCROWS TO HOUSE
-        house_wallet = get_house_wallet_address(house_wallet_secret)
+        game.payout_tx = f"{winner_payout_tx},{loser_payout_tx}"  # Store both tx signatures
+        logger.info(f"[ESCROW GAME] Paid winner {total_payout} SOL (winner escrow: {winner_payout_tx}, loser escrow: {loser_payout_tx})")
 
-        # Collect from winner's escrow (remaining after payout)
+        # STEP 5: SWEEP ALL REMAINING FUNDS TO TREASURY
+        # After paying winner 98% from each escrow, sweep whatever is left to treasury
+        # This includes: 2% game fees + 0.025 tx fees + any dust/rounding errors
         winner_fee_tx = await collect_fees_from_escrow(
             rpc_url,
             winner_escrow_secret,
             winner_escrow_address,
-            house_wallet
+            treasury_address  # Sweep everything remaining
         )
 
-        # Collect from loser's escrow (full amount + fee)
         loser_fee_tx = await collect_fees_from_escrow(
             rpc_url,
             loser_escrow_secret,
             loser_escrow_address,
-            house_wallet
+            treasury_address  # Sweep everything remaining
         )
 
-        logger.info(f"[ESCROW GAME] Collected fees from both escrows (winner: {winner_fee_tx}, loser: {loser_fee_tx})")
+        logger.info(f"[ESCROW GAME] Swept remaining funds to treasury (winner escrow: {winner_fee_tx}, loser escrow: {loser_fee_tx})")
+        logger.info(f"[ESCROW GAME] Expected revenue: ~{total_fees:.6f} SOL ({winner_fee_rate*100:.1f}% game fees + tx fees + dust)")
 
-        # Note: Total fees collected = game_fee + (TRANSACTION_FEE × 2)
-        # This happens automatically by collecting all remaining from both escrows
+        # STEP 6: SEND REFERRAL COMMISSION (if winner was referred)
+        # Commission is sent directly to referrer's individual escrow wallet
+        referral_commission_amount = 0.0
+        if winner.referred_by:
+            # Import here to avoid circular dependency
+            from database import repo
+            from tiers import calculate_referral_commission, get_referral_commission_rate
+            from referrals import send_referral_commission
+
+            # Get referrer
+            referrer = repo.Database().get_user(winner.referred_by)
+            if referrer:
+                # Calculate commission based on referrer's tier
+                game_fees_only = fee_per_escrow * 2  # Exclude tx fees from commission
+                referral_commission_amount = calculate_referral_commission(game_fees_only, referrer)
+
+                # Send commission from treasury to referrer's escrow wallet
+                try:
+                    commission_tx = await send_referral_commission(
+                        referrer=referrer,
+                        commission_amount=referral_commission_amount,
+                        from_wallet_secret=house_wallet_secret,
+                        rpc_url=rpc_url,
+                        encryption_key=encryption_key,
+                        db=repo.Database(),
+                        game_id=game_id
+                    )
+
+                    commission_rate = get_referral_commission_rate(referrer)
+                    logger.info(f"[REFERRAL] Winner {winner.user_id} referred by {referrer.user_id}")
+                    logger.info(f"[REFERRAL] Commission sent: {referral_commission_amount:.6f} SOL ({referrer.tier} tier: {commission_rate*100:.1f}%) | TX: {commission_tx}")
+                except Exception as e:
+                    logger.error(f"[REFERRAL] Failed to send commission: {e}", exc_info=True)
+                    # Don't fail the game if referral payment fails
+                    referral_commission_amount = 0.0
+
+        # STEP 7: UPDATE TIER FOR BOTH PLAYERS (volume-based auto-upgrade)
+        from tiers import update_user_tier
+
+        # Update creator tier
+        creator_upgraded = update_user_tier(creator)
+        if creator_upgraded:
+            repo.Database().save_user(creator)
+            logger.info(f"[TIER] Creator {creator.user_id} upgraded to {creator.tier}")
+
+        # Update acceptor tier
+        acceptor_upgraded = update_user_tier(acceptor)
+        if acceptor_upgraded:
+            repo.Database().save_user(acceptor)
+            logger.info(f"[TIER] Acceptor {acceptor.user_id} upgraded to {acceptor.tier}")
 
         # Mark game as completed
         game.status = GameStatus.COMPLETED
         game.completed_at = datetime.utcnow()
 
-        logger.info(f"[ESCROW GAME] Game {game_id} completed - winner: {game.winner_id}")
+        logger.info(f"[ESCROW GAME] Game {game_id} completed - winner: {game.winner_id}, referral commission: {referral_commission_amount:.6f} SOL")
 
         return game
 

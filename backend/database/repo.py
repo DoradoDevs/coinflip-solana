@@ -31,11 +31,21 @@ class Database:
                 wallet_address TEXT,
                 encrypted_secret TEXT,
                 connected_wallet TEXT,
+                payout_wallet TEXT,
                 games_played INTEGER DEFAULT 0,
                 games_won INTEGER DEFAULT 0,
                 total_wagered REAL DEFAULT 0.0,
                 total_won REAL DEFAULT 0.0,
                 total_lost REAL DEFAULT 0.0,
+                tier TEXT DEFAULT 'Starter',
+                tier_fee_rate REAL DEFAULT 0.02,
+                referral_code TEXT,
+                referred_by INTEGER,
+                referral_earnings REAL DEFAULT 0.0,
+                total_referrals INTEGER DEFAULT 0,
+                referral_payout_escrow_address TEXT,
+                referral_payout_escrow_secret TEXT,
+                total_referral_claimed REAL DEFAULT 0.0,
                 username TEXT,
                 created_at TEXT,
                 last_active TEXT
@@ -151,11 +161,21 @@ class Database:
             wallet_address=row["wallet_address"],
             encrypted_secret=row["encrypted_secret"],
             connected_wallet=row["connected_wallet"],
+            payout_wallet=row["payout_wallet"] if "payout_wallet" in row.keys() else None,
             games_played=row["games_played"],
             games_won=row["games_won"],
             total_wagered=row["total_wagered"],
             total_won=row["total_won"],
             total_lost=row["total_lost"],
+            tier=row["tier"] if "tier" in row.keys() else "Starter",
+            tier_fee_rate=row["tier_fee_rate"] if "tier_fee_rate" in row.keys() else 0.02,
+            referral_code=row["referral_code"] if "referral_code" in row.keys() else None,
+            referred_by=row["referred_by"] if "referred_by" in row.keys() else None,
+            referral_earnings=row["referral_earnings"] if "referral_earnings" in row.keys() else 0.0,
+            total_referrals=row["total_referrals"] if "total_referrals" in row.keys() else 0,
+            referral_payout_escrow_address=row["referral_payout_escrow_address"] if "referral_payout_escrow_address" in row.keys() else None,
+            referral_payout_escrow_secret=row["referral_payout_escrow_secret"] if "referral_payout_escrow_secret" in row.keys() else None,
+            total_referral_claimed=row["total_referral_claimed"] if "total_referral_claimed" in row.keys() else 0.0,
             username=row["username"],
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow(),
             last_active=datetime.fromisoformat(row["last_active"]) if row["last_active"] else datetime.utcnow(),
@@ -168,15 +188,20 @@ class Database:
 
         cursor.execute("""
             INSERT OR REPLACE INTO users (
-                user_id, platform, wallet_address, encrypted_secret, connected_wallet,
+                user_id, platform, wallet_address, encrypted_secret, connected_wallet, payout_wallet,
                 games_played, games_won, total_wagered, total_won, total_lost,
+                tier, tier_fee_rate, referral_code, referred_by,
+                referral_earnings, total_referrals,
+                referral_payout_escrow_address, referral_payout_escrow_secret, total_referral_claimed,
                 username, created_at, last_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             user.user_id, user.platform, user.wallet_address, user.encrypted_secret,
-            user.connected_wallet, user.games_played, user.games_won, user.total_wagered,
-            user.total_won, user.total_lost, user.username,
-            user.created_at.isoformat(), user.last_active.isoformat()
+            user.connected_wallet, user.payout_wallet, user.games_played, user.games_won, user.total_wagered,
+            user.total_won, user.total_lost, user.tier, user.tier_fee_rate,
+            user.referral_code, user.referred_by, user.referral_earnings, user.total_referrals,
+            user.referral_payout_escrow_address, user.referral_payout_escrow_secret, user.total_referral_claimed,
+            user.username, user.created_at.isoformat(), user.last_active.isoformat()
         ))
 
         conn.commit()
@@ -455,3 +480,50 @@ class Database:
             used_for=row["used_for"],
             used_at=datetime.fromisoformat(row["used_at"]) if row["used_at"] else datetime.utcnow(),
         )
+
+    # === Atomic Operations (SECURITY: Prevent race conditions) ===
+
+    def atomic_accept_wager(self, wager_id: str, acceptor_id: int) -> bool:
+        """Atomically accept wager if still open.
+
+        SECURITY: Prevents double-acceptance race condition by using
+        exclusive database lock.
+
+        Args:
+            wager_id: Wager ID to accept
+            acceptor_id: User ID of acceptor
+
+        Returns:
+            True if wager was accepted successfully, False if already accepted
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            # Begin exclusive transaction (locks database)
+            cursor.execute("BEGIN EXCLUSIVE")
+
+            # Check and update in single atomic operation
+            cursor.execute("""
+                UPDATE wagers
+                SET status = 'accepting', acceptor_id = ?
+                WHERE wager_id = ? AND status = 'open'
+            """, (acceptor_id, wager_id))
+
+            # Check if update succeeded
+            if cursor.rowcount == 0:
+                # Wager not open (already accepted or doesn't exist)
+                conn.rollback()
+                conn.close()
+                return False
+
+            # Success - commit transaction
+            conn.commit()
+            conn.close()
+            return True
+
+        except Exception as e:
+            logger.error(f"Atomic accept failed: {e}", exc_info=True)
+            conn.rollback()
+            conn.close()
+            raise

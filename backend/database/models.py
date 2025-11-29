@@ -40,12 +40,30 @@ class User:
     # For Web users (non-custodial)
     connected_wallet: Optional[str] = None
 
+    # Payout Configuration (REQUIRED before betting)
+    payout_wallet: Optional[str] = None  # Where to send winnings (MUST BE SET)
+
     # Stats
     games_played: int = 0
     games_won: int = 0
     total_wagered: float = 0.0
     total_won: float = 0.0
     total_lost: float = 0.0
+
+    # Tier System (volume-based fee discounts)
+    tier: str = "Starter"  # Starter, Bronze, Silver, Gold, Diamond
+    tier_fee_rate: float = 0.02  # Current fee rate based on tier (2% default)
+
+    # Referral System
+    referral_code: Optional[str] = None  # User's own referral code
+    referred_by: Optional[int] = None  # User ID of referrer
+    referral_earnings: float = 0.0  # Total SOL earned from referrals (lifetime)
+    total_referrals: int = 0  # Number of users referred
+
+    # Referral Payout Escrow (individual wallet per user for referral earnings)
+    referral_payout_escrow_address: Optional[str] = None  # Where referral commissions accumulate
+    referral_payout_escrow_secret: Optional[str] = None  # Encrypted secret key
+    total_referral_claimed: float = 0.0  # Total SOL claimed from referral earnings
 
     # Metadata
     username: Optional[str] = None

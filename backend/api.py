@@ -5,16 +5,17 @@ Supports both custodial (like Telegram) and wallet connect modes.
 import os
 import logging
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import defaultdict
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Import our modules
-from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus
+from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus, UsedSignature
 from game import (
     play_house_game,
     play_pvp_game_with_escrows,
@@ -38,6 +39,7 @@ from utils import (
     format_win_rate,
 )
 from notifications import notify_wager_accepted
+from referrals import claim_referral_earnings, get_referral_escrow_balance
 
 # Load environment
 load_dotenv()
@@ -55,15 +57,68 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 # Database
 db = Database()
 
+# SECURITY: Emergency stop flag
+def is_emergency_stop_enabled() -> bool:
+    """Check if emergency stop is enabled."""
+    return os.path.exists("EMERGENCY_STOP")
+
+def check_emergency_stop():
+    """Raise exception if emergency stop enabled."""
+    if is_emergency_stop_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Platform is temporarily unavailable for maintenance. Please try again later."
+        )
+
+# SECURITY: Simple in-memory rate limiter
+# Format: {ip_address: {endpoint: [(timestamp1, timestamp2, ...)]}}
+rate_limit_store = defaultdict(lambda: defaultdict(list))
+
+def check_rate_limit(request: Request, endpoint: str, max_requests: int, window_seconds: int):
+    """Simple rate limiter using IP address.
+
+    Args:
+        request: FastAPI request object
+        endpoint: Endpoint identifier (e.g., "quick_flip")
+        max_requests: Maximum requests allowed in window
+        window_seconds: Time window in seconds
+
+    Raises:
+        HTTPException: If rate limit exceeded
+    """
+    client_ip = request.client.host
+    now = datetime.utcnow()
+    window_start = now - timedelta(seconds=window_seconds)
+
+    # Get request history for this IP + endpoint
+    requests = rate_limit_store[client_ip][endpoint]
+
+    # Remove old requests outside the window
+    requests = [ts for ts in requests if ts > window_start]
+    rate_limit_store[client_ip][endpoint] = requests
+
+    # Check if limit exceeded
+    if len(requests) >= max_requests:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Max {max_requests} requests per {window_seconds} seconds."
+        )
+
+    # Add current request
+    requests.append(now)
+
 # FastAPI app
 app = FastAPI(title="Solana Coinflip API", version="1.0.0")
 
-# CORS
+# CORS - SECURITY: Restrict to your domain in production
+# Development: allow_origins=["*"]
+# Production: allow_origins=["https://yourdomain.com", "https://www.yourdomain.com"]
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your domain
+    allow_origins=CORS_ORIGINS if CORS_ORIGINS != ["*"] else ["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],  # Only needed methods
     allow_headers=["*"],
 )
 
@@ -100,6 +155,11 @@ class AcceptWagerRequest(BaseModel):
 class CancelWagerRequest(BaseModel):
     wager_id: str
     creator_wallet: str
+
+
+class ClaimReferralRequest(BaseModel):
+    """Request to claim referral earnings."""
+    user_wallet: str  # User's wallet address (for web users)
 
 
 class UserResponse(BaseModel):
@@ -220,17 +280,26 @@ async def get_balance(wallet_address: str):
         balance = await get_sol_balance(RPC_URL, wallet_address)
         return {"wallet": wallet_address, "balance": balance}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get balance for {wallet_address}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve wallet balance")
 
 
 # === GAME ENDPOINTS ===
 
 @app.post("/api/game/quick-flip")
-async def quick_flip(request: QuickFlipRequest) -> GameResponse:
+async def quick_flip(request: QuickFlipRequest, http_request: Request) -> GameResponse:
     """Play quick flip vs house.
 
     For Web users: Must provide deposit_tx_signature proving they sent (wager + fee) to house wallet.
+
+    Rate limit: 10 requests per 60 seconds per IP
     """
+    # SECURITY: Check emergency stop
+    check_emergency_stop()
+
+    # SECURITY: Rate limiting (10 games per minute max)
+    check_rate_limit(http_request, "quick_flip", max_requests=10, window_seconds=60)
+
     try:
         user = ensure_web_user(request.wallet_address)
 
@@ -271,6 +340,14 @@ async def quick_flip(request: QuickFlipRequest) -> GameResponse:
                     detail=f"Invalid deposit transaction. Please send exactly {total_required} SOL ({request.amount} wager + {TRANSACTION_FEE} fee) to {house_address}"
                 )
 
+            # SECURITY: Check if signature already used (prevent replay attacks)
+            if db.signature_already_used(request.deposit_tx_signature):
+                used_sig = db.get_used_signature(request.deposit_tx_signature)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Transaction signature already used. Each transaction can only be used once."
+                )
+
             logger.info(f"[REAL MAINNET] Verified Web deposit: {total_required} SOL from {request.wallet_address} (tx: {request.deposit_tx_signature})")
 
         side = CoinSide.HEADS if request.side == "heads" else CoinSide.TAILS
@@ -302,6 +379,16 @@ async def quick_flip(request: QuickFlipRequest) -> GameResponse:
 
         db.save_user(user)
 
+        # SECURITY: Mark signature as used (prevent replay attacks)
+        if user.platform == "web" and request.deposit_tx_signature:
+            db.save_used_signature(UsedSignature(
+                signature=request.deposit_tx_signature,
+                user_wallet=request.wallet_address,
+                used_for=f"quick_flip_{game.game_id}",
+                used_at=datetime.utcnow()
+            ))
+            logger.info(f"[SECURITY] Marked signature {request.deposit_tx_signature[:16]}... as used")
+
         # Return game result
         winner_wallet = None
         if game.winner_id == user.user_id:
@@ -322,9 +409,11 @@ async def quick_flip(request: QuickFlipRequest) -> GameResponse:
             created_at=game.created_at.isoformat()
         )
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        logger.error(f"Quick flip failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Quick flip failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred processing your game. Please try again.")
 
 
 @app.get("/api/game/{game_id}")
@@ -386,12 +475,20 @@ async def get_recent_games(limit: int = 10) -> List[GameResponse]:
 # === WAGER ENDPOINTS (PVP) ===
 
 @app.post("/api/wager/create")
-async def create_wager(request: CreateWagerRequest) -> WagerResponse:
+async def create_wager(request: CreateWagerRequest, http_request: Request) -> WagerResponse:
     """Create a PVP wager with isolated escrow wallet.
 
     SECURITY: Generates unique escrow wallet for creator's deposit.
     Prevents single point of failure.
+
+    Rate limit: 20 requests per 60 seconds per IP
     """
+    # SECURITY: Check emergency stop
+    check_emergency_stop()
+
+    # SECURITY: Rate limiting (20 wagers per minute max)
+    check_rate_limit(http_request, "create_wager", max_requests=20, window_seconds=60)
+
     try:
         import uuid
 
@@ -471,8 +568,8 @@ async def create_wager(request: CreateWagerRequest) -> WagerResponse:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Create wager failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Create wager failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create wager. Please try again.")
 
 
 @app.get("/api/wagers/open")
@@ -494,20 +591,28 @@ async def get_open_wagers() -> List[WagerResponse]:
 
 
 @app.post("/api/wager/accept")
-async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
+async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Request) -> GameResponse:
     """Accept a PVP wager with isolated escrow wallets.
 
     SECURITY: Creates second escrow wallet for acceptor, executes game using both escrows.
+
+    Rate limit: 20 requests per 60 seconds per IP
     """
+    # SECURITY: Check emergency stop
+    check_emergency_stop()
+
+    # SECURITY: Rate limiting (20 accepts per minute max)
+    check_rate_limit(http_request, "accept_wager", max_requests=20, window_seconds=60)
+
     try:
         user = ensure_web_user(request.acceptor_wallet)
 
-        # Get wager
+        # Get wager (initial check only)
         wagers = db.get_open_wagers(limit=100)
         wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
 
-        if not wager or wager.status != "open":
-            raise HTTPException(status_code=404, detail="Wager not found or no longer available")
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
 
         # Can't accept own wager
         if wager.creator_wallet == request.acceptor_wallet:
@@ -518,12 +623,24 @@ async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
         if not creator:
             raise HTTPException(status_code=404, detail="Wager creator not found")
 
-        # SECURITY: Change status to "accepting" to prevent race conditions
-        wager.status = "accepting"
-        wager.acceptor_id = user.user_id
-        db.save_wager(wager)
+        # SECURITY: Atomically accept wager (prevents double-acceptance race condition)
+        # This uses an exclusive database lock to ensure only one user can accept
+        accepted = db.atomic_accept_wager(request.wager_id, user.user_id)
 
-        logger.info(f"[WAGER] Status changed to 'accepting' for wager {wager.wager_id}")
+        if not accepted:
+            raise HTTPException(
+                status_code=409,
+                detail="Wager already accepted by another user. Please try a different wager."
+            )
+
+        # Reload wager to get updated status
+        wagers = db.get_open_wagers(limit=100)
+        wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
+        if not wager:
+            # Shouldn't happen, but handle gracefully
+            raise HTTPException(status_code=500, detail="Wager disappeared after acceptance")
+
+        logger.info(f"[WAGER] Atomically accepted wager {wager.wager_id} by user {user.user_id}")
 
         # SECURITY: Create unique escrow wallet for acceptor
         escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
@@ -635,13 +752,13 @@ async def accept_wager_endpoint(request: AcceptWagerRequest) -> GameResponse:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Accept wager failed: {e}")
+        logger.error(f"Accept wager failed: {e}", exc_info=True)
         # Revert wager status on error
         if 'wager' in locals():
             wager.status = "open"
             wager.acceptor_id = None
             db.save_wager(wager)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to accept wager. Please try again.")
 
 
 @app.post("/api/wager/cancel")
@@ -735,8 +852,83 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Cancel wager failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Cancel wager failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to cancel wager. Please try again.")
+
+
+@app.post("/api/referral/claim")
+async def claim_referral_endpoint(request: ClaimReferralRequest):
+    """Claim referral earnings from escrow to payout wallet.
+
+    Takes 1% treasury fee on claims.
+    """
+    try:
+        # Get user
+        user = ensure_web_user(request.user_wallet)
+
+        # Check rate limit
+        check_rate_limit(request, "claim_referral", max_requests=5, window_seconds=3600)  # 5 claims per hour
+
+        # Get current escrow balance
+        escrow_balance = await get_referral_escrow_balance(user, RPC_URL)
+
+        # Claim earnings
+        success, message, amount_claimed = await claim_referral_earnings(
+            user=user,
+            rpc_url=RPC_URL,
+            encryption_key=ENCRYPTION_KEY,
+            treasury_wallet=TREASURY_WALLET,
+            db=db
+        )
+
+        if not success:
+            raise HTTPException(status_code=400, detail=message)
+
+        logger.info(f"User {user.user_id} claimed {amount_claimed:.6f} SOL referral earnings")
+
+        return {
+            "success": True,
+            "message": message,
+            "amount_claimed": amount_claimed,
+            "escrow_balance_before": escrow_balance,
+            "total_lifetime_claimed": user.total_referral_claimed,
+            "total_lifetime_earnings": user.referral_earnings
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Claim referral failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to claim referral earnings. Please try again.")
+
+
+@app.get("/api/referral/balance")
+async def get_referral_balance_endpoint(user_wallet: str):
+    """Get user's referral earnings balance."""
+    try:
+        # Get user
+        user = ensure_web_user(user_wallet)
+
+        # Get escrow balance
+        escrow_balance = await get_referral_escrow_balance(user, RPC_URL)
+
+        return {
+            "success": True,
+            "user_id": user.user_id,
+            "referral_escrow_address": user.referral_payout_escrow_address,
+            "current_balance": escrow_balance,
+            "total_lifetime_earnings": user.referral_earnings,
+            "total_lifetime_claimed": user.total_referral_claimed,
+            "total_referrals": user.total_referrals,
+            "tier": user.tier,
+            "referral_code": user.referral_code
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get referral balance failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get referral balance.")
 
 
 # === WEBSOCKET FOR LIVE UPDATES ===
