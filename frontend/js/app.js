@@ -64,19 +64,17 @@ async function loadActiveWagers() {
         }
 
         container.innerHTML = wagers.map(wager => {
-            const creatorSideEmoji = wager.creator_side === 'heads' ? '🪙' : '🎯';
             const opponentSide = wager.creator_side === 'heads' ? 'tails' : 'heads';
-            const opponentSideEmoji = opponentSide === 'heads' ? '🪙' : '🎯';
 
             return `
                 <div class="wager-card" data-wager-id="${wager.id}">
                     <div class="wager-info">
                         <span class="wager-amount">${wager.amount} SOL</span>
-                        <span class="wager-side">${creatorSideEmoji} ${wager.creator_side.toUpperCase()}</span>
+                        <span class="wager-side">${wager.creator_side.toUpperCase()}</span>
                         <span class="wager-creator">${wager.creator_wallet.slice(0, 4)}...${wager.creator_wallet.slice(-4)}</span>
                     </div>
                     <button class="btn btn-primary btn-accept" onclick="openAcceptModal('${wager.id}', ${wager.amount}, '${wager.creator_side}')">
-                        Accept (${opponentSideEmoji} ${opponentSide.toUpperCase()})
+                        Accept (${opponentSide.toUpperCase()})
                     </button>
                 </div>
             `;
@@ -165,10 +163,9 @@ function updateCreateSummary() {
     const continueBtn = document.getElementById('continueBtn');
 
     if (createWagerState.selectedSide && createWagerState.selectedAmount) {
-        const sideEmoji = createWagerState.selectedSide === 'heads' ? '🪙' : '🎯';
         const totalDeposit = createWagerState.selectedAmount + 0.025;
 
-        document.getElementById('summarySide').textContent = `${sideEmoji} ${createWagerState.selectedSide.toUpperCase()}`;
+        document.getElementById('summarySide').textContent = createWagerState.selectedSide.toUpperCase();
         document.getElementById('summaryAmount').textContent = `${createWagerState.selectedAmount} SOL`;
         document.getElementById('summaryTotal').textContent = `${totalDeposit.toFixed(3)} SOL`;
 
@@ -252,8 +249,8 @@ function copyEscrowAddress() {
     const address = document.getElementById('escrowAddress').textContent;
     navigator.clipboard.writeText(address).then(() => {
         const btn = document.querySelector('#step2 .copy-btn');
-        btn.textContent = '✓ Copied!';
-        setTimeout(() => btn.textContent = '📋 Copy', 2000);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
     });
 }
 
@@ -293,10 +290,9 @@ async function verifyDeposit() {
         const data = await response.json();
 
         // Show success
-        const sideEmoji = createWagerState.selectedSide === 'heads' ? '🪙' : '🎯';
         document.getElementById('newWagerId').textContent = createWagerState.wagerId.slice(0, 8) + '...';
         document.getElementById('newWagerAmount').textContent = `${createWagerState.selectedAmount} SOL`;
-        document.getElementById('newWagerSide').textContent = `${sideEmoji} ${createWagerState.selectedSide.toUpperCase()}`;
+        document.getElementById('newWagerSide').textContent = createWagerState.selectedSide.toUpperCase();
 
         document.getElementById('step2').style.display = 'none';
         document.getElementById('step3').style.display = 'block';
@@ -309,7 +305,7 @@ async function verifyDeposit() {
         alert(err.message || 'Deposit verification failed. Please check your transaction and try again.');
     } finally {
         verifyBtn.disabled = false;
-        verifyBtn.textContent = '✓ Verify Deposit & Create Wager';
+        verifyBtn.textContent = 'Verify Deposit & Create Wager';
     }
 }
 
@@ -337,12 +333,9 @@ function openAcceptModal(wagerId, amount, creatorSide) {
     document.getElementById('acceptTxSignature').value = '';
 
     // Update step 1 UI
-    const creatorEmoji = creatorSide === 'heads' ? '🪙' : '🎯';
-    const yourEmoji = yourSide === 'heads' ? '🪙' : '🎯';
-
     document.getElementById('acceptAmount').textContent = `${amount} SOL`;
-    document.getElementById('acceptCreatorSide').textContent = `${creatorEmoji} ${creatorSide.toUpperCase()}`;
-    document.getElementById('acceptYourSide').textContent = `${yourEmoji} ${yourSide.toUpperCase()}`;
+    document.getElementById('acceptCreatorSide').textContent = creatorSide.toUpperCase();
+    document.getElementById('acceptYourSide').textContent = yourSide.toUpperCase();
     document.getElementById('acceptTotal').textContent = `${totalDeposit.toFixed(3)} SOL`;
 
     // Show step 1
@@ -422,8 +415,8 @@ function copyAcceptEscrowAddress() {
     const address = document.getElementById('acceptEscrowAddress').textContent;
     navigator.clipboard.writeText(address).then(() => {
         const btn = document.querySelector('#acceptStep2 .copy-btn');
-        btn.textContent = '✓ Copied!';
-        setTimeout(() => btn.textContent = '📋 Copy', 2000);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
     });
 }
 
@@ -474,30 +467,29 @@ async function verifyAcceptDeposit() {
         alert(err.message || 'Failed to execute coinflip. Please try again.');
     } finally {
         verifyBtn.disabled = false;
-        verifyBtn.textContent = '✓ Verify & Execute Coinflip!';
+        verifyBtn.textContent = 'Verify & Execute Coinflip';
     }
 }
 
 function showGameResult(result) {
     const resultContainer = document.getElementById('gameResultContent');
     const isWinner = result.winner_wallet === acceptWagerState.acceptorWallet;
-    const resultEmoji = result.result === 'heads' ? '🪙' : '🎯';
     const payout = (acceptWagerState.amount * 2) * 0.98;
 
     let html = '';
 
     if (isWinner) {
         html = `
-            <div class="result-icon">🎉</div>
+            <div class="result-icon win-icon">WIN</div>
             <h2 class="result-title win">YOU WON!</h2>
             <div class="result-details">
                 <div class="result-row">
                     <span>Coin Result:</span>
-                    <span>${resultEmoji} ${result.result.toUpperCase()}</span>
+                    <span>${result.result.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Your Side:</span>
-                    <span>${acceptWagerState.yourSide === 'heads' ? '🪙' : '🎯'} ${acceptWagerState.yourSide.toUpperCase()}</span>
+                    <span>${acceptWagerState.yourSide.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Payout:</span>
@@ -505,22 +497,22 @@ function showGameResult(result) {
                 </div>
             </div>
             <p class="fairness-note">
-                🔒 Provably Fair<br>
+                Provably Fair<br>
                 <small>Blockhash: ${result.blockhash ? result.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
             </p>
         `;
     } else {
         html = `
-            <div class="result-icon">😔</div>
+            <div class="result-icon lose-icon">LOSS</div>
             <h2 class="result-title lose">YOU LOST</h2>
             <div class="result-details">
                 <div class="result-row">
                     <span>Coin Result:</span>
-                    <span>${resultEmoji} ${result.result.toUpperCase()}</span>
+                    <span>${result.result.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Your Side:</span>
-                    <span>${acceptWagerState.yourSide === 'heads' ? '🪙' : '🎯'} ${acceptWagerState.yourSide.toUpperCase()}</span>
+                    <span>${acceptWagerState.yourSide.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Lost:</span>
@@ -528,7 +520,7 @@ function showGameResult(result) {
                 </div>
             </div>
             <p class="fairness-note">
-                🔒 Provably Fair<br>
+                Provably Fair<br>
                 <small>Blockhash: ${result.blockhash ? result.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
             </p>
         `;
@@ -545,18 +537,18 @@ function showGameResult(result) {
 // ============================================
 
 function showFairnessInfo() {
-    alert(`🔒 Provably Fair System
+    alert(`Provably Fair System
 
 Our coinflip uses Solana's blockhash for true randomness:
 
 1. When you play, we get the latest Solana blockhash
 2. We combine: SHA-256(blockhash + wager_id)
-3. If the hash is even → HEADS, if odd → TAILS
+3. If the hash is even = HEADS, if odd = TAILS
 
 Why it's fair:
-• Blockhash is generated by Solana network
-• It's unpredictable and verifiable on-chain
-• Every result can be verified!
+- Blockhash is generated by Solana network
+- It's unpredictable and verifiable on-chain
+- Every result can be verified!
 
 All funds are held in escrow until the flip is complete.`);
 }
