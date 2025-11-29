@@ -83,6 +83,9 @@ class User:
     session_token: Optional[str] = None
     session_expires: Optional[datetime] = None
 
+    # Admin
+    is_admin: bool = False
+
 
 @dataclass
 class Game:
@@ -171,3 +174,21 @@ class UsedSignature:
     user_wallet: str  # User who used this signature
     used_for: str  # What it was used for (e.g., "wager_abc123", "game_xyz456")
     used_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class SupportTicket:
+    """Support ticket for contact requests and password resets."""
+    ticket_id: str
+    email: str
+    ticket_type: str  # "password_reset", "support", "bug_report"
+    subject: str
+    message: str
+
+    user_id: Optional[int] = None  # If user is logged in
+    status: str = "open"  # open, in_progress, resolved, closed
+    admin_notes: Optional[str] = None
+
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[int] = None  # Admin user_id who resolved

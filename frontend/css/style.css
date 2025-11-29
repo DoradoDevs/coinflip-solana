@@ -38,10 +38,13 @@ body {
 
 /* Header */
 .header {
-    text-align: center;
-    padding: 40px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 30px 0;
     border-bottom: 1px solid var(--border);
     margin-bottom: 40px;
+    gap: 20px;
 }
 
 .logo h1 {
@@ -658,6 +661,7 @@ body {
 
 .recent-game-card {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     background: var(--surface-light);
@@ -667,6 +671,7 @@ body {
     margin-bottom: 10px;
     cursor: pointer;
     transition: all 0.2s ease;
+    gap: 10px;
 }
 
 .recent-game-card:hover {
@@ -722,6 +727,31 @@ body {
     color: var(--primary);
     font-size: 0.85rem;
     font-weight: 600;
+}
+
+/* Blockhash display under each game */
+.game-blockhash {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    margin-top: 5px;
+}
+
+.blockhash-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.blockhash-value {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: var(--primary);
+    background: var(--surface);
+    padding: 4px 8px;
+    border-radius: 4px;
 }
 
 /* On Chain Proof Button */
@@ -882,14 +912,6 @@ body {
 }
 
 /* Header Auth Buttons */
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 20px;
-}
-
 .auth-buttons {
     display: flex;
     gap: 10px;
@@ -942,6 +964,64 @@ body {
     margin-bottom: 8px;
     color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+/* Info tooltip for form labels */
+.info-tooltip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 50%;
+    cursor: help;
+    position: relative;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+    vertical-align: middle;
+}
+
+.info-tooltip:hover {
+    opacity: 1;
+    background: rgba(20, 241, 149, 0.2);
+    color: var(--primary);
+}
+
+.info-tooltip:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 14px;
+    background: var(--surface-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: normal;
+    white-space: normal;
+    width: 250px;
+    text-align: center;
+    z-index: 100;
+    margin-bottom: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.info-tooltip:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--border);
+    margin-bottom: 2px;
 }
 
 .form-input {

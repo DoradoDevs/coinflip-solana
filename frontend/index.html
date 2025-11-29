@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Coinflip - PVP Solana Wagers</title>
-    <link rel="stylesheet" href="css/style.css?v=2">
+    <link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
     <div class="container">
@@ -247,12 +247,10 @@
             <!-- Recent Games Section -->
             <section class="recent-games-section">
                 <h2>Recent Games</h2>
+                <p class="section-subtitle">Click any game to verify - blockhash shown below each result</p>
                 <div id="recentGames" class="recent-games-list">
                     <div class="loading-games">Loading recent games...</div>
                 </div>
-                <button id="onChainProofBtn" class="btn btn-secondary btn-proof" onclick="showFairnessInfo()">
-                    On Chain Proof
-                </button>
             </section>
 
             <!-- How It Works -->
@@ -304,7 +302,7 @@
                         Don't have an account? <a href="#" onclick="switchAuthForm('register')">Register</a>
                     </p>
                     <p class="auth-recovery">
-                        Forgot password? <a href="mailto:support@coinflipvp.com">Contact support</a>
+                        Forgot password? <a href="#" onclick="showSupportModal('password_reset')">Request Reset</a>
                     </p>
                 </div>
 
@@ -312,7 +310,7 @@
                 <div id="registerForm" class="auth-form" style="display: none;">
                     <h2>Create Account</h2>
                     <div class="form-group">
-                        <label>Email</label>
+                        <label>Email <span class="info-tooltip" title="An email is required only to send the user a new password when needed, and will never be shared with third parties">?</span></label>
                         <input type="email" id="registerEmail" class="form-input" placeholder="your@email.com">
                     </div>
                     <div class="form-group">
@@ -427,16 +425,56 @@
             </div>
         </div>
 
+        <!-- Support/Password Reset Modal -->
+        <div id="supportModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="modal-close" onclick="closeSupportModal()">&times;</span>
+                <h2 id="supportModalTitle">Contact Support</h2>
+
+                <form id="supportForm" onsubmit="submitSupportTicket(event)">
+                    <div class="form-group">
+                        <label>Your Email</label>
+                        <input type="email" id="supportEmail" class="form-input" placeholder="your@email.com" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Type</label>
+                        <select id="supportType" class="form-input">
+                            <option value="support">General Support</option>
+                            <option value="password_reset">Password Reset</option>
+                            <option value="bug_report">Bug Report</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="supportSubject" class="form-input" placeholder="Brief description" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Message</label>
+                        <textarea id="supportMessage" class="form-input" rows="4" placeholder="Describe your issue in detail..." required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-large" id="supportSubmitBtn">
+                        Submit Ticket
+                    </button>
+
+                    <p id="supportStatus" class="auth-error" style="display: none;"></p>
+                </form>
+            </div>
+        </div>
+
         <!-- Footer -->
         <footer class="footer">
             <p>Provably Fair - All results verifiable on Solana blockchain</p>
             <p class="footer-links">
                 <a href="#" onclick="showFairnessInfo()">How Fairness Works</a> |
-                <a href="mailto:support@coinflipvp.com">Contact Support</a>
+                <a href="#" onclick="showSupportModal()">Contact Support</a>
             </p>
         </footer>
     </div>
 
-    <script src="js/app.js?v=2"></script>
+    <script src="js/app.js?v=4"></script>
 </body>
 </html>

@@ -986,6 +986,8 @@ async function loadRecentGames() {
                 `${game.winner_wallet.slice(0, 4)}...${game.winner_wallet.slice(-4)}` : 'N/A';
             const payout = (game.amount * 2 * 0.98).toFixed(4);
             const timeAgo = getTimeAgo(new Date(game.completed_at));
+            const blockhashShort = game.proof && game.proof.blockhash ?
+                `${game.proof.blockhash.slice(0, 12)}...${game.proof.blockhash.slice(-8)}` : 'N/A';
 
             return `
                 <div class="recent-game-card" onclick="showProofModal('${game.game_id}', ${JSON.stringify(game.proof).replace(/"/g, '&quot;')})">
@@ -997,6 +999,10 @@ async function loadRecentGames() {
                     <div class="game-meta">
                         <span class="game-time">${timeAgo}</span>
                         <span class="verify-link">Verify</span>
+                    </div>
+                    <div class="game-blockhash">
+                        <span class="blockhash-label">Blockhash:</span>
+                        <code class="blockhash-value">${blockhashShort}</code>
                     </div>
                 </div>
             `;
@@ -1150,4 +1156,120 @@ function showFairnessInfo() {
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
     });
+}
+
+// ============================================
+// SUPPORT TICKET MODAL
+// ============================================
+
+function showSupportModal(ticketType = 'support') {
+    const modal = document.getElementById('supportModal');
+    const titleEl = document.getElementById('supportModalTitle');
+    const typeSelect = document.getElementById('supportType');
+    const subjectInput = document.getElementById('supportSubject');
+    const messageInput = document.getElementById('supportMessage');
+    const emailInput = document.getElementById('supportEmail');
+    const statusEl = document.getElementById('supportStatus');
+
+    // Reset form
+    document.getElementById('supportForm').reset();
+    statusEl.style.display = 'none';
+
+    // Set type based on parameter
+    typeSelect.value = ticketType;
+
+    // Set title based on type
+    if (ticketType === 'password_reset') {
+        titleEl.textContent = 'Password Reset Request';
+        subjectInput.value = 'Password Reset Request';
+        messageInput.placeholder = 'Please enter your account email and any additional information...';
+    } else {
+        titleEl.textContent = 'Contact Support';
+        subjectInput.value = '';
+        messageInput.placeholder = 'Describe your issue in detail...';
+    }
+
+    // Pre-fill email if logged in
+    if (currentUser && currentUser.email) {
+        emailInput.value = currentUser.email;
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeSupportModal() {
+    document.getElementById('supportModal').style.display = 'none';
+}
+
+async function submitSupportTicket(event) {
+    event.preventDefault();
+
+    const emailInput = document.getElementById('supportEmail');
+    const typeSelect = document.getElementById('supportType');
+    const subjectInput = document.getElementById('supportSubject');
+    const messageInput = document.getElementById('supportMessage');
+    const submitBtn = document.getElementById('supportSubmitBtn');
+    const statusEl = document.getElementById('supportStatus');
+
+    const email = emailInput.value.trim();
+    const ticketType = typeSelect.value;
+    const subject = subjectInput.value.trim();
+    const message = messageInput.value.trim();
+
+    // Validation
+    if (!email || !subject || !message) {
+        statusEl.textContent = 'Please fill in all fields';
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#FF4757';
+        return;
+    }
+
+    if (message.length < 10) {
+        statusEl.textContent = 'Message must be at least 10 characters';
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#FF4757';
+        return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+    statusEl.style.display = 'none';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/support/ticket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: email,
+                ticket_type: ticketType,
+                subject: subject,
+                message: message
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to submit ticket');
+        }
+
+        // Success
+        statusEl.textContent = `Ticket submitted! ID: ${data.ticket_id}. We will respond to your email.`;
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#14F195';
+
+        // Reset form after short delay
+        setTimeout(() => {
+            closeSupportModal();
+        }, 3000);
+
+    } catch (err) {
+        console.error('Support ticket error:', err);
+        statusEl.textContent = err.message || 'Failed to submit ticket. Please try again.';
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#FF4757';
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Ticket';
+    }
 }

@@ -435,11 +435,22 @@ ssh root@165.227.186.124
 ```
 
 ### Update Procedures
+
+**IMPORTANT: Coinflip has TWO directories on server!**
+- `/opt/coinflip` - Git repo (backend + frontend source)
+- `/var/www/html` - Where nginx serves frontend from
+
 ```bash
-# Coinflip Web (from local)
+# Coinflip Web - FULL DEPLOYMENT (from local)
 cd Coinflip
 git add . && git commit -m "update" && git push
-ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp frontend/* /var/www/html/ -r"
+ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp -r frontend/* /var/www/html/"
+
+# Coinflip - Backend only (restart API)
+ssh root@157.245.13.24 "cd /opt/coinflip && git pull && systemctl restart coinflip"
+
+# Coinflip - Frontend only (no service restart needed)
+ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp -r frontend/* /var/www/html/"
 
 # VolT Bot
 ssh root@165.227.186.124 "cd /opt/volt-bot && git pull && systemctl restart voltbot"

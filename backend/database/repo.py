@@ -6,7 +6,7 @@ import sqlite3
 import logging
 from typing import Optional, List
 from datetime import datetime
-from .models import User, Game, Wager, Transaction, GameType, GameStatus, CoinSide
+from .models import User, Game, Wager, Transaction, GameType, GameStatus, CoinSide, SupportTicket
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,27 @@ class Database:
                 last_active TEXT,
                 last_login TEXT,
                 session_token TEXT,
-                session_expires TEXT
+                session_expires TEXT,
+                is_admin INTEGER DEFAULT 0
+            )
+        """)
+
+        # Support tickets table (for contact support and password resets)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS support_tickets (
+                ticket_id TEXT PRIMARY KEY,
+                user_id INTEGER,
+                email TEXT NOT NULL,
+                ticket_type TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                message TEXT NOT NULL,
+                status TEXT DEFAULT 'open',
+                admin_notes TEXT,
+                created_at TEXT,
+                resolved_at TEXT,
+                resolved_by INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                FOREIGN KEY (resolved_by) REFERENCES users(user_id)
             )
         """)
 
@@ -146,6 +166,9 @@ class Database:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_session ON users(session_token)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tickets_type ON support_tickets(ticket_type)")
 
         conn.commit()
         conn.close()
@@ -203,6 +226,7 @@ class Database:
             last_login=datetime.fromisoformat(row["last_login"]) if row.get("last_login") else None,
             session_token=row["session_token"] if "session_token" in keys else None,
             session_expires=datetime.fromisoformat(row["session_expires"]) if row.get("session_expires") else None,
+            is_admin=bool(row["is_admin"]) if "is_admin" in keys else False,
         )
 
     def save_user(self, user: User) -> int:
@@ -221,7 +245,7 @@ class Database:
                     referral_earnings=?, pending_referral_earnings=?, total_referrals=?,
                     referral_payout_escrow_address=?, referral_payout_escrow_secret=?, total_referral_claimed=?,
                     username=?, display_name=?, created_at=?, last_active=?, last_login=?,
-                    session_token=?, session_expires=?
+                    session_token=?, session_expires=?, is_admin=?
                 WHERE user_id=?
             """, (
                 user.platform, user.email, user.password_hash, int(user.email_verified),
@@ -233,7 +257,7 @@ class Database:
                 user.username, user.display_name, user.created_at.isoformat(), user.last_active.isoformat(),
                 user.last_login.isoformat() if user.last_login else None,
                 user.session_token, user.session_expires.isoformat() if user.session_expires else None,
-                user.user_id
+                int(user.is_admin), user.user_id
             ))
             user_id = user.user_id
         else:
@@ -247,8 +271,8 @@ class Database:
                     referral_earnings, pending_referral_earnings, total_referrals,
                     referral_payout_escrow_address, referral_payout_escrow_secret, total_referral_claimed,
                     username, display_name, created_at, last_active, last_login,
-                    session_token, session_expires
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    session_token, session_expires, is_admin
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 user.platform, user.email, user.password_hash, int(user.email_verified),
                 user.wallet_address, user.encrypted_secret, user.connected_wallet, user.payout_wallet,
@@ -258,7 +282,8 @@ class Database:
                 user.referral_payout_escrow_address, user.referral_payout_escrow_secret, user.total_referral_claimed,
                 user.username, user.display_name, user.created_at.isoformat(), user.last_active.isoformat(),
                 user.last_login.isoformat() if user.last_login else None,
-                user.session_token, user.session_expires.isoformat() if user.session_expires else None
+                user.session_token, user.session_expires.isoformat() if user.session_expires else None,
+                int(user.is_admin)
             ))
             user_id = cursor.lastrowid
 
@@ -690,3 +715,149 @@ class Database:
             conn.rollback()
             conn.close()
             raise
+
+    # === Support Ticket Operations ===
+
+    def save_ticket(self, ticket: SupportTicket) -> str:
+        """Save a support ticket."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO support_tickets (
+                ticket_id, user_id, email, ticket_type, subject, message,
+                status, admin_notes, created_at, resolved_at, resolved_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ticket.ticket_id, ticket.user_id, ticket.email.lower(),
+            ticket.ticket_type, ticket.subject, ticket.message,
+            ticket.status, ticket.admin_notes,
+            ticket.created_at.isoformat(),
+            ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+            ticket.resolved_by
+        ))
+
+        conn.commit()
+        conn.close()
+        return ticket.ticket_id
+
+    def get_ticket(self, ticket_id: str) -> Optional[SupportTicket]:
+        """Get ticket by ID."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM support_tickets WHERE ticket_id = ?", (ticket_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_ticket(row)
+
+    def get_tickets(self, status: Optional[str] = None, ticket_type: Optional[str] = None,
+                   limit: int = 50) -> List[SupportTicket]:
+        """Get tickets with optional filters."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM support_tickets WHERE 1=1"
+        params = []
+
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if ticket_type:
+            query += " AND ticket_type = ?"
+            params.append(ticket_type)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_ticket(row) for row in rows]
+
+    def _row_to_ticket(self, row: sqlite3.Row) -> SupportTicket:
+        """Convert database row to SupportTicket object."""
+        return SupportTicket(
+            ticket_id=row["ticket_id"],
+            user_id=row["user_id"],
+            email=row["email"],
+            ticket_type=row["ticket_type"],
+            subject=row["subject"],
+            message=row["message"],
+            status=row["status"],
+            admin_notes=row["admin_notes"],
+            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow(),
+            resolved_at=datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None,
+            resolved_by=row["resolved_by"],
+        )
+
+    # === Admin Operations ===
+
+    def get_all_users(self, limit: int = 100, offset: int = 0) -> List[User]:
+        """Get all users for admin panel."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM users
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_user(row) for row in rows]
+
+    def get_user_count(self) -> int:
+        """Get total user count."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        return count
+
+    def get_ticket_count(self, status: Optional[str] = None) -> int:
+        """Get ticket count with optional status filter."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        if status:
+            cursor.execute("SELECT COUNT(*) FROM support_tickets WHERE status = ?", (status,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM support_tickets")
+
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        return count
+
+    def search_users(self, query: str, limit: int = 20) -> List[User]:
+        """Search users by email or username."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        search_term = f"%{query}%"
+        cursor.execute("""
+            SELECT * FROM users
+            WHERE email LIKE ? OR username LIKE ? OR display_name LIKE ?
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (search_term, search_term, search_term, limit))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_user(row) for row in rows]

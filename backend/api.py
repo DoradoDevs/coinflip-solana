@@ -15,7 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # Import our modules
-from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus, UsedSignature
+from database import Database, User, Game, Wager, GameType, CoinSide, GameStatus, UsedSignature, SupportTicket
+import uuid
+import secrets
 from game import (
     play_pvp_game_with_escrows,
     generate_wallet,
@@ -193,6 +195,27 @@ class UpdateReferralCodeRequest(BaseModel):
     referral_code: str
 
 
+# === SUPPORT TICKET MODELS ===
+
+class SubmitTicketRequest(BaseModel):
+    """Submit a support ticket or password reset request."""
+    email: str
+    ticket_type: str  # "support", "password_reset", "bug_report"
+    subject: str
+    message: str
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """Admin request to reset a user's password."""
+    user_id: int
+    new_password: str  # Admin-generated password to send to user
+
+
+class AdminResolveTicketRequest(BaseModel):
+    """Admin request to resolve a ticket."""
+    admin_notes: Optional[str] = None
+
+
 class ProfileResponse(BaseModel):
     """User profile response."""
     user_id: int
@@ -295,6 +318,17 @@ def require_auth(request: Request) -> User:
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated. Please login.")
+    return user
+
+
+def require_admin(request: Request) -> User:
+    """Require authenticated admin user, raise 401/403 if not."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please login.")
+    if not user.is_admin:
+        logger.warning(f"Non-admin user {user.email} attempted admin access")
+        raise HTTPException(status_code=403, detail="Admin access required.")
     return user
 
 
@@ -1242,6 +1276,276 @@ async def get_referral_balance_endpoint(user_wallet: str):
     except Exception as e:
         logger.error(f"Get referral balance failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get referral balance.")
+
+
+# === SUPPORT TICKET ENDPOINTS (PUBLIC) ===
+
+@app.post("/api/support/ticket")
+async def submit_support_ticket(request: SubmitTicketRequest, http_request: Request):
+    """Submit a support ticket (public - no auth required).
+
+    Ticket types: 'support', 'password_reset', 'bug_report'
+    """
+    # Rate limit: 5 tickets per hour per IP
+    check_rate_limit(http_request, "submit_ticket", max_requests=5, window_seconds=3600)
+
+    # Validate email
+    if not validate_email(request.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    # Validate ticket type
+    valid_types = ["support", "password_reset", "bug_report"]
+    if request.ticket_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid ticket type. Must be one of: {valid_types}")
+
+    # Validate subject and message
+    if not request.subject or len(request.subject) < 3:
+        raise HTTPException(status_code=400, detail="Subject is required (min 3 characters)")
+    if not request.message or len(request.message) < 10:
+        raise HTTPException(status_code=400, detail="Message is required (min 10 characters)")
+
+    # Check if user exists (optional - for linking ticket to user)
+    user = db.get_user_by_email(request.email.lower())
+    user_id = user.user_id if user else None
+
+    # Create ticket
+    ticket_id = f"TKT-{uuid.uuid4().hex[:8].upper()}"
+    ticket = SupportTicket(
+        ticket_id=ticket_id,
+        user_id=user_id,
+        email=request.email.lower(),
+        ticket_type=request.ticket_type,
+        subject=request.subject,
+        message=request.message,
+        status="open"
+    )
+
+    db.save_ticket(ticket)
+    logger.info(f"Support ticket created: {ticket_id} ({request.ticket_type}) from {request.email}")
+
+    return {
+        "success": True,
+        "message": "Ticket submitted successfully. We will respond via email.",
+        "ticket_id": ticket_id,
+        "ticket_type": request.ticket_type
+    }
+
+
+# === ADMIN ENDPOINTS (SECURE) ===
+
+@app.get("/api/admin/check")
+async def admin_check(http_request: Request):
+    """Check if current user is admin."""
+    user = get_current_user(http_request)
+    if not user:
+        return {"is_admin": False, "authenticated": False}
+    return {"is_admin": user.is_admin, "authenticated": True, "email": user.email}
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(http_request: Request):
+    """Get admin dashboard statistics."""
+    admin = require_admin(http_request)
+
+    user_count = db.get_user_count()
+    open_tickets = db.get_ticket_count(status="open")
+    total_tickets = db.get_ticket_count()
+
+    return {
+        "success": True,
+        "stats": {
+            "total_users": user_count,
+            "open_tickets": open_tickets,
+            "total_tickets": total_tickets,
+            "admin_email": admin.email
+        }
+    }
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(http_request: Request, limit: int = 50, offset: int = 0):
+    """List all users (admin only)."""
+    require_admin(http_request)
+
+    users = db.get_all_users(limit=min(limit, 100), offset=offset)
+    total = db.get_user_count()
+
+    return {
+        "success": True,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "users": [
+            {
+                "user_id": u.user_id,
+                "email": u.email,
+                "username": u.username,
+                "display_name": u.display_name,
+                "payout_wallet": u.payout_wallet,
+                "games_played": u.games_played,
+                "games_won": u.games_won,
+                "total_wagered": u.total_wagered,
+                "tier": u.tier,
+                "is_admin": u.is_admin,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "last_login": u.last_login.isoformat() if u.last_login else None
+            }
+            for u in users
+        ]
+    }
+
+
+@app.get("/api/admin/users/search")
+async def admin_search_users(http_request: Request, q: str):
+    """Search users by email/username (admin only)."""
+    require_admin(http_request)
+
+    if not q or len(q) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+
+    users = db.search_users(q, limit=20)
+
+    return {
+        "success": True,
+        "query": q,
+        "count": len(users),
+        "users": [
+            {
+                "user_id": u.user_id,
+                "email": u.email,
+                "username": u.username,
+                "display_name": u.display_name,
+                "payout_wallet": u.payout_wallet,
+                "tier": u.tier,
+                "is_admin": u.is_admin,
+                "created_at": u.created_at.isoformat() if u.created_at else None
+            }
+            for u in users
+        ]
+    }
+
+
+@app.get("/api/admin/tickets")
+async def admin_list_tickets(http_request: Request, status: Optional[str] = None,
+                             ticket_type: Optional[str] = None, limit: int = 50):
+    """List support tickets (admin only)."""
+    require_admin(http_request)
+
+    tickets = db.get_tickets(status=status, ticket_type=ticket_type, limit=min(limit, 100))
+
+    return {
+        "success": True,
+        "count": len(tickets),
+        "filters": {"status": status, "ticket_type": ticket_type},
+        "tickets": [
+            {
+                "ticket_id": t.ticket_id,
+                "user_id": t.user_id,
+                "email": t.email,
+                "ticket_type": t.ticket_type,
+                "subject": t.subject,
+                "message": t.message,
+                "status": t.status,
+                "admin_notes": t.admin_notes,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
+                "resolved_by": t.resolved_by
+            }
+            for t in tickets
+        ]
+    }
+
+
+@app.post("/api/admin/tickets/{ticket_id}/resolve")
+async def admin_resolve_ticket(ticket_id: str, request: AdminResolveTicketRequest, http_request: Request):
+    """Resolve a support ticket (admin only)."""
+    admin = require_admin(http_request)
+
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Update ticket
+    ticket.status = "resolved"
+    ticket.admin_notes = request.admin_notes
+    ticket.resolved_at = datetime.utcnow()
+    ticket.resolved_by = admin.user_id
+
+    db.save_ticket(ticket)
+    logger.info(f"Admin {admin.email} resolved ticket {ticket_id}")
+
+    return {
+        "success": True,
+        "message": "Ticket resolved successfully",
+        "ticket_id": ticket_id,
+        "resolved_by": admin.email
+    }
+
+
+@app.post("/api/admin/user/{user_id}/reset-password")
+async def admin_reset_password(user_id: int, request: AdminResetPasswordRequest, http_request: Request):
+    """Reset a user's password (admin only).
+
+    Admin generates a new password, updates the user's password,
+    then manually sends the new password to the user via email.
+    """
+    admin = require_admin(http_request)
+
+    # Get user
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Validate new password
+    valid, error = validate_password(request.new_password)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error)
+
+    # Hash and save new password
+    user.password_hash = hash_password(request.new_password)
+    # Invalidate any existing sessions
+    user.session_token = None
+    user.session_expires = None
+
+    db.save_user(user)
+
+    logger.info(f"Admin {admin.email} reset password for user {user.email} (ID: {user_id})")
+
+    return {
+        "success": True,
+        "message": f"Password reset for {user.email}. Send the new password to user manually.",
+        "user_id": user_id,
+        "user_email": user.email,
+        "admin_action_by": admin.email
+    }
+
+
+@app.post("/api/admin/user/{user_id}/toggle-admin")
+async def admin_toggle_admin(user_id: int, http_request: Request):
+    """Toggle admin status for a user (admin only)."""
+    admin = require_admin(http_request)
+
+    # Prevent self-demotion
+    if admin.user_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot modify your own admin status")
+
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Toggle admin status
+    user.is_admin = not user.is_admin
+    db.save_user(user)
+
+    action = "granted" if user.is_admin else "revoked"
+    logger.info(f"Admin {admin.email} {action} admin access for {user.email}")
+
+    return {
+        "success": True,
+        "message": f"Admin access {action} for {user.email}",
+        "user_id": user_id,
+        "is_admin": user.is_admin
+    }
 
 
 # === WEBSOCKET FOR LIVE UPDATES ===
