@@ -129,11 +129,11 @@ function switchAuthForm(form) {
 }
 
 async function handleLogin() {
-    const email = document.getElementById('loginEmail').value.trim();
+    const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value;
 
-    if (!email || !password) {
-        alert('Please enter email and password');
+    if (!username || !password) {
+        alert('Please enter username and password');
         return;
     }
 
@@ -141,7 +141,7 @@ async function handleLogin() {
         const response = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ username, password })
         });
 
         const data = await response.json();

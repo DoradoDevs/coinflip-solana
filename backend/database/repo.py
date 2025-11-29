@@ -283,9 +283,9 @@ class Database:
             display_name=row["display_name"] if "display_name" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow(),
             last_active=datetime.fromisoformat(row["last_active"]) if row["last_active"] else datetime.utcnow(),
-            last_login=datetime.fromisoformat(row["last_login"]) if row.get("last_login") else None,
+            last_login=datetime.fromisoformat(row["last_login"]) if ("last_login" in keys and row["last_login"]) else None,
             session_token=row["session_token"] if "session_token" in keys else None,
-            session_expires=datetime.fromisoformat(row["session_expires"]) if row.get("session_expires") else None,
+            session_expires=datetime.fromisoformat(row["session_expires"]) if ("session_expires" in keys and row["session_expires"]) else None,
             is_admin=bool(row["is_admin"]) if "is_admin" in keys else False,
         )
 

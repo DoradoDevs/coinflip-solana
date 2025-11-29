@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(sshpass -p '039c9b30fa44d00c4c74fc14af' ssh -o StrictHostKeyChecking=no root@157.245.13.24 \"cd /opt/coinflip && git pull && fuser -k 8000/tcp 2>/dev/null; systemctl restart coinflip && sleep 2 && systemctl status coinflip --no-pager | head -15\")"
     ],
     "deny": [],
     "ask": []

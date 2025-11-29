@@ -467,6 +467,9 @@ journalctl -u fugazibot -f
 
 # Check Coinflip API
 journalctl -u coinflip -f
+
+# Kill process hogging a port (if "address already in use" error)
+fuser -k 8000/tcp  # Then restart service
 ```
 
 ---

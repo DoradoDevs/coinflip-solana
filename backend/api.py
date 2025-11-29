@@ -180,7 +180,7 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     """User login request."""
-    email: str
+    username: str
     password: str
 
 
@@ -465,19 +465,19 @@ async def register(request: RegisterRequest, http_request: Request):
 
 @app.post("/api/auth/login")
 async def login(request: LoginRequest, http_request: Request):
-    """Login to existing account."""
+    """Login to existing account using username."""
     # Rate limit: 10 login attempts per minute per IP
     check_rate_limit(http_request, "login", max_requests=10, window_seconds=60)
 
-    # Find user by email
-    user = db.get_user_by_email(request.email.lower())
+    # Find user by username
+    user = db.get_user_by_username(request.username.lower())
 
     if not user or not user.password_hash:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # Verify password
     if not verify_password(request.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # Create new session
     session_token, session_expires = create_session(user)
@@ -488,7 +488,7 @@ async def login(request: LoginRequest, http_request: Request):
 
     db.save_user(user)
 
-    logger.info(f"User logged in: {user.email}")
+    logger.info(f"User logged in: {user.username} ({user.email})")
 
     return {
         "success": True,
