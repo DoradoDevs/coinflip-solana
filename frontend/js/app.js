@@ -116,7 +116,7 @@ function showAuthModal(form = 'login') {
 function closeAuthModal() {
     document.getElementById('authModal').style.display = 'none';
     // Clear form inputs
-    document.getElementById('loginEmail').value = '';
+    document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('registerEmail').value = '';
     document.getElementById('registerUsername').value = '';
