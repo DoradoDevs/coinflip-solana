@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Coinflip</title>
-    <link rel="stylesheet" href="css/style.css?v=4">
+    <link rel="stylesheet" href="css/style.css?v=7">
     <style>
         /* Admin-specific styles */
         .admin-container {
@@ -375,8 +375,8 @@
         </div>
         <form id="loginForm">
             <div class="form-group">
-                <label>Email</label>
-                <input type="email" id="loginEmail" required placeholder="admin@coinflipvp.com">
+                <label>Username</label>
+                <input type="text" id="loginUsername" required placeholder="Your username">
             </div>
             <div class="form-group">
                 <label>Password</label>
@@ -548,7 +548,7 @@
         // Login form
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
+            const username = document.getElementById('loginUsername').value.trim();
             const password = document.getElementById('loginPassword').value;
             const errorEl = document.getElementById('loginError');
 
@@ -556,7 +556,7 @@
                 const res = await fetch(`${API_URL}/api/auth/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify({ username, password })
                 });
 
                 const data = await res.json();
@@ -579,7 +579,8 @@
                 showDashboard();
 
             } catch (err) {
-                errorEl.textContent = err.message;
+                const errMsg = typeof err === 'object' ? (err.message || JSON.stringify(err)) : String(err);
+                errorEl.textContent = errMsg;
                 errorEl.style.display = 'block';
             }
         });
