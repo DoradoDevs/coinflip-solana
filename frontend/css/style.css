@@ -966,7 +966,7 @@ body {
     font-size: 0.9rem;
 }
 
-/* Info tooltip for form labels */
+/* Info tooltip for form labels - uses native browser title tooltip */
 .info-tooltip {
     display: inline-flex;
     align-items: center;
@@ -980,7 +980,6 @@ body {
     font-weight: bold;
     border-radius: 50%;
     cursor: help;
-    position: relative;
     opacity: 0.5;
     transition: opacity 0.2s;
     vertical-align: middle;
@@ -990,38 +989,6 @@ body {
     opacity: 1;
     background: rgba(20, 241, 149, 0.2);
     color: var(--primary);
-}
-
-.info-tooltip:hover::after {
-    content: attr(title);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 10px 14px;
-    background: var(--surface-light);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    font-size: 0.8rem;
-    font-weight: normal;
-    white-space: normal;
-    width: 250px;
-    text-align: center;
-    z-index: 100;
-    margin-bottom: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.info-tooltip:hover::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: var(--border);
-    margin-bottom: 2px;
 }
 
 .form-input {

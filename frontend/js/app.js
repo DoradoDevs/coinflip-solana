@@ -1124,7 +1124,7 @@ function showFairnessInfo() {
                     <li><strong>128 even values</strong> (0,2,4...254) = HEADS (50%)</li>
                     <li><strong>128 odd values</strong> (1,3,5...255) = TAILS (50%)</li>
                 </ul>
-                <p class="emphasis">This is a mathematically perfect 50/50 split - no house edge on the flip itself.</p>
+                <p class="emphasis">This is a mathematically perfect 50/50 split - neither player has an edge.</p>
             </div>
 
             <div class="fairness-section">
