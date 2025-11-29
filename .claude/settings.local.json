@@ -34,7 +34,8 @@
       "Bash(sshpass -p '039c9b30fa44d00c4c74fc14af' ssh -o StrictHostKeyChecking=no root@157.245.13.24 \"echo ''✅ Connected''; hostname\")",
       "Bash(icacls \"c:\\Users\\Clock\\.ssh\\volt_key\" /inheritance:r /grant:r \"%USERNAME%:R\")",
       "Bash(curl -X POST \"https://api.telegram.org/bot8118580040:AAF8leNlsAPgmzo6HiWw6isQls5aU9EvDsc/setWebhook?url=https://api.coinflipvp.com/telegram/webhook\")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []

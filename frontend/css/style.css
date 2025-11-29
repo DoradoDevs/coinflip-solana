@@ -633,15 +633,15 @@ body {
 
 .steps-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
 }
 
 .step-card {
     background: var(--surface-light);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 25px;
+    padding: 20px 15px;
     text-align: center;
 }
 
@@ -731,7 +731,7 @@ body {
     }
 
     .steps-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .escrow-address-box {
