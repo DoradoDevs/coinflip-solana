@@ -7,7 +7,8 @@ from .solana_ops import (
     get_latest_blockhash,
     payout_winner,
     collect_fee,
-    verify_deposit_transaction
+    verify_deposit_transaction,
+    verify_deposit_to_escrow
 )
 from .escrow import (
     create_escrow_wallet,
@@ -31,6 +32,7 @@ __all__ = [
     "payout_winner",
     "collect_fee",
     "verify_deposit_transaction",
+    "verify_deposit_to_escrow",
     "create_escrow_wallet",
     "payout_from_escrow",
     "collect_fees_from_escrow",

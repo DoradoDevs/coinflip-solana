@@ -267,3 +267,97 @@ async def verify_deposit_transaction(
     except Exception as e:
         logger.error(f"Error verifying transaction {transaction_signature}: {e}")
         return False
+
+
+async def verify_deposit_to_escrow(
+    rpc_url: str,
+    transaction_signature: str,
+    expected_recipient: str,
+    expected_amount: float,
+    tolerance: float = 0.001  # Allow slightly larger tolerance
+) -> bool:
+    """Verify a deposit transaction to escrow (flexible - only checks recipient and amount).
+
+    This version does NOT check the sender, allowing users to send from any wallet.
+
+    Args:
+        rpc_url: Solana RPC URL
+        transaction_signature: Transaction signature to verify
+        expected_recipient: Expected recipient wallet address (escrow)
+        expected_amount: Expected amount in SOL
+        tolerance: Tolerance for amount matching (default 0.001 SOL)
+
+    Returns:
+        True if transaction is valid, False otherwise
+    """
+    try:
+        from solders.signature import Signature
+
+        logger.info(f"[ESCROW_VERIFY] Verifying tx: {transaction_signature}")
+        logger.info(f"[ESCROW_VERIFY] Expected recipient: {expected_recipient}")
+        logger.info(f"[ESCROW_VERIFY] Expected amount: {expected_amount} SOL")
+
+        async with AsyncClient(rpc_url) as client:
+            # Parse signature
+            sig = Signature.from_string(transaction_signature)
+
+            # Get transaction details
+            tx_resp = await client.get_transaction(
+                sig,
+                encoding="jsonParsed",
+                commitment=Confirmed,
+                max_supported_transaction_version=0
+            )
+
+            if not tx_resp.value:
+                logger.warning(f"[ESCROW_VERIFY] Transaction not found: {transaction_signature}")
+                return False
+
+            tx = tx_resp.value
+
+            # Check if transaction was successful
+            if tx.transaction.meta.err is not None:
+                logger.warning(f"[ESCROW_VERIFY] Transaction failed on-chain: {transaction_signature}")
+                return False
+
+            # Parse transaction to find transfer instruction
+            instructions = tx.transaction.transaction.message.instructions
+
+            # Look for system program transfer instruction
+            for ix in instructions:
+                # Check if this is a parsed instruction
+                if hasattr(ix, 'parsed') and ix.parsed:
+                    parsed = ix.parsed
+
+                    # Check if it's a transfer instruction
+                    if parsed.get('type') == 'transfer':
+                        info = parsed.get('info', {})
+
+                        # Verify recipient (escrow)
+                        recipient = info.get('destination')
+                        logger.info(f"[ESCROW_VERIFY] Found transfer to: {recipient}")
+
+                        if recipient != expected_recipient:
+                            logger.warning(f"[ESCROW_VERIFY] Recipient mismatch: expected {expected_recipient}, got {recipient}")
+                            continue
+
+                        # Verify amount
+                        lamports = info.get('lamports', 0)
+                        actual_amount = lamports / LAMPORTS_PER_SOL
+                        logger.info(f"[ESCROW_VERIFY] Transfer amount: {actual_amount} SOL")
+
+                        if abs(actual_amount - expected_amount) > tolerance:
+                            logger.warning(f"[ESCROW_VERIFY] Amount mismatch: expected {expected_amount}, got {actual_amount} (diff: {abs(actual_amount - expected_amount)})")
+                            continue
+
+                        # All checks passed!
+                        sender = info.get('source', 'unknown')
+                        logger.info(f"[ESCROW_VERIFY] SUCCESS! Verified {actual_amount} SOL from {sender} to {recipient}")
+                        return True
+
+            logger.warning(f"[ESCROW_VERIFY] No matching transfer found in transaction")
+            return False
+
+    except Exception as e:
+        logger.error(f"[ESCROW_VERIFY] Error verifying transaction {transaction_signature}: {e}", exc_info=True)
+        return False

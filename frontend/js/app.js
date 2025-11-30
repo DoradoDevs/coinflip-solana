@@ -116,12 +116,20 @@ function showAuthModal(form = 'login') {
 
 function closeAuthModal() {
     document.getElementById('authModal').style.display = 'none';
-    // Clear form inputs
-    document.getElementById('loginUsername').value = '';
-    document.getElementById('loginPassword').value = '';
-    document.getElementById('registerEmail').value = '';
-    document.getElementById('registerUsername').value = '';
-    document.getElementById('registerPassword').value = '';
+    // Clear form inputs (with null checks)
+    const loginUsername = document.getElementById('loginUsername');
+    const loginPassword = document.getElementById('loginPassword');
+    const registerEmail = document.getElementById('registerEmail');
+    const registerUsername = document.getElementById('registerUsername');
+    const registerPassword = document.getElementById('registerPassword');
+    const registerReferral = document.getElementById('registerReferral');
+
+    if (loginUsername) loginUsername.value = '';
+    if (loginPassword) loginPassword.value = '';
+    if (registerEmail) registerEmail.value = '';
+    if (registerUsername) registerUsername.value = '';
+    if (registerPassword) registerPassword.value = '';
+    if (registerReferral) registerReferral.value = '';
 }
 
 function switchAuthForm(form) {
@@ -171,7 +179,8 @@ async function handleRegister() {
     const email = document.getElementById('registerEmail').value.trim();
     const username = document.getElementById('registerUsername').value.trim();
     const password = document.getElementById('registerPassword').value;
-    const referralCode = document.getElementById('registerReferral').value.trim();
+    const referralEl = document.getElementById('registerReferral');
+    const referralCode = referralEl ? referralEl.value.trim() : '';
 
     if (!email || !username || !password) {
         alert('Please fill in all required fields');

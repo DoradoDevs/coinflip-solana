@@ -933,7 +933,7 @@ async def verify_wager_deposit(wager_id: str, request: VerifyDepositRequest, htt
     check_rate_limit(http_request, "verify_deposit", max_requests=30, window_seconds=60)
 
     try:
-        from game.solana_ops import verify_deposit_transaction
+        from game.solana_ops import verify_deposit_to_escrow
         from database import UsedSignature
 
         # Get the pending wager
@@ -956,20 +956,28 @@ async def verify_wager_deposit(wager_id: str, request: VerifyDepositRequest, htt
         # Calculate expected amount
         total_required = wager.amount + TRANSACTION_FEE
 
-        # Verify deposit on-chain
-        is_valid = await verify_deposit_transaction(
+        logger.info(f"[VERIFY] Checking deposit for wager {wager_id}")
+        logger.info(f"[VERIFY] Expected: {total_required} SOL to {wager.creator_escrow_address}")
+        logger.info(f"[VERIFY] Creator wallet: {wager.creator_wallet}")
+        logger.info(f"[VERIFY] TX signature: {request.tx_signature}")
+
+        # Verify deposit on-chain - use flexible verification that only checks recipient and amount
+        # (Don't strictly check sender since user might send from any wallet)
+        is_valid = await verify_deposit_to_escrow(
             RPC_URL,
             request.tx_signature,
-            wager.creator_wallet,  # sender
             wager.creator_escrow_address,  # recipient (escrow)
             total_required  # expected amount
         )
 
         if not is_valid:
+            logger.warning(f"[VERIFY] Deposit verification FAILED for wager {wager_id}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Deposit verification failed. Please ensure you sent exactly {total_required} SOL to {wager.creator_escrow_address}"
             )
+
+        logger.info(f"[VERIFY] Deposit verified successfully for wager {wager_id}")
 
         # Record used signature
         used_sig = UsedSignature(
