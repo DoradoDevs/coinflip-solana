@@ -381,6 +381,26 @@ class Database:
 
         return self._row_to_user(row)
 
+    def get_user_by_wallet(self, wallet_address: str) -> Optional[User]:
+        """Get user by wallet address (connected_wallet or payout_wallet)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM users
+            WHERE connected_wallet = ? OR payout_wallet = ?
+            ORDER BY username IS NOT NULL DESC
+            LIMIT 1
+        """, (wallet_address, wallet_address))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        return self._row_to_user(row)
+
     def get_user_by_session(self, session_token: str) -> Optional[User]:
         """Get user by session token (validates expiration)."""
         conn = sqlite3.connect(self.db_path)

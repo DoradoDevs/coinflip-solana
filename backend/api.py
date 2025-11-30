@@ -772,6 +772,7 @@ class RecentGameResponse(BaseModel):
     amount: float
     result: str
     winner_wallet: str
+    winner_username: Optional[str] = None  # Display name for winner
     blockhash: str
     payout_tx: Optional[str]
     completed_at: str
@@ -797,12 +798,20 @@ async def get_recent_games(limit: int = 10) -> List[RecentGameResponse]:
         if not game.blockhash or not game.result:
             continue  # Skip games without proof data
 
-        # Get winner wallet
+        # Get winner info (wallet and username)
         winner_wallet = ""
+        winner_username = None
         if game.winner_id:
             winner_user = db.get_user(game.winner_id)
             if winner_user:
-                winner_wallet = winner_user.connected_wallet or ""
+                winner_wallet = winner_user.connected_wallet or winner_user.payout_wallet or ""
+                winner_username = winner_user.username
+
+        # Fallback: look up by wallet if no username found
+        if not winner_username and winner_wallet:
+            wallet_user = db.get_user_by_wallet(winner_wallet)
+            if wallet_user and wallet_user.username:
+                winner_username = wallet_user.username
 
         # Generate proof data for verification
         seed = f"{game.blockhash}{game.game_id}"
@@ -824,6 +833,9 @@ async def get_recent_games(limit: int = 10) -> List[RecentGameResponse]:
             "algorithm": "SHA-256(blockhash + game_id) first byte: even=HEADS, odd=TAILS"
         }
 
+        # payout_tx may contain multiple TXs separated by comma - use first one for Solscan
+        payout_tx = game.payout_tx.split(",")[0] if game.payout_tx else None
+
         results.append(RecentGameResponse(
             game_id=game.game_id,
             game_type=game.game_type.value,
@@ -832,8 +844,9 @@ async def get_recent_games(limit: int = 10) -> List[RecentGameResponse]:
             amount=game.amount,
             result=game.result.value,
             winner_wallet=winner_wallet,
+            winner_username=winner_username,
             blockhash=game.blockhash,
-            payout_tx=game.payout_tx,
+            payout_tx=payout_tx,
             completed_at=game.completed_at.isoformat() if game.completed_at else "",
             proof=proof
         ))
@@ -1029,8 +1042,15 @@ async def get_open_wagers() -> List[WagerResponse]:
     result = []
     for w in wagers:
         # Get creator's username for display
+        # Try by ID first, then by wallet (handles different user ID systems)
         creator = db.get_user(w.creator_id)
         creator_username = creator.username if creator and creator.username else None
+
+        # Fallback: look up by wallet address if no username found
+        if not creator_username and w.creator_wallet:
+            wallet_user = db.get_user_by_wallet(w.creator_wallet)
+            if wallet_user and wallet_user.username:
+                creator_username = wallet_user.username
 
         result.append(WagerResponse(
             wager_id=w.wager_id,

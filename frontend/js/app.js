@@ -996,8 +996,8 @@ async function loadRecentGames() {
         const gamesToDisplay = recentGames;
 
         container.innerHTML = gamesToDisplay.map(game => {
-            const winnerShort = game.winner_wallet ?
-                `${game.winner_wallet.slice(0, 4)}...${game.winner_wallet.slice(-4)}` : 'N/A';
+            const winnerShort = game.winner_username ||
+                (game.winner_wallet ? `${game.winner_wallet.slice(0, 4)}...${game.winner_wallet.slice(-4)}` : 'N/A');
             const payout = (game.amount * 2 * 0.98).toFixed(4);
             const timeAgo = getTimeAgo(new Date(game.completed_at));
             const blockhashShort = game.proof && game.proof.blockhash ?
