@@ -8,12 +8,13 @@
 1. [Project Portfolio](#project-portfolio)
 2. [Infrastructure & Servers](#infrastructure--servers)
 3. [Coinflip Web App](#coinflip-web-app)
-4. [VolT Trading Bot](#volt-trading-bot)
-5. [FUGAZI Trading Bot](#fugazi-trading-bot)
-6. [Fee Structure Summary](#fee-structure-summary)
-7. [Technical Patterns & Best Practices](#technical-patterns--best-practices)
-8. [Deployment Guide](#deployment-guide)
-9. [Wallets & Treasury](#wallets--treasury)
+4. [VoLT Web Platform](#volt-web-platform-volume-terminal)
+5. [VolT Telegram Trading Bot](#volt-telegram-trading-bot)
+6. [FUGAZI Trading Bot](#fugazi-trading-bot)
+7. [Fee Structure Summary](#fee-structure-summary)
+8. [Technical Patterns & Best Practices](#technical-patterns--best-practices)
+9. [Deployment Guide](#deployment-guide)
+10. [Wallets & Treasury](#wallets--treasury)
 
 ---
 
@@ -25,7 +26,8 @@
 |---------|------|--------|----------|
 | **Coinflip** | PVP Wager Web App | Production | coinflipvp.com |
 | **Coinflip-Telegram** | Telegram Bot | Development | Desktop folder |
-| **VolT Bot** | Trading Bot | Production | 165.227.186.124 |
+| **VoLT Web Platform** | Volume Trading Web App | Production | volumeterminal.com |
+| **VolT Bot** | Telegram Trading Bot | Production | 165.227.186.124 |
 | **FUGAZI Bot** | Trading Bot (White-label) | Production | 165.227.186.124 |
 
 ### Repository Structure
@@ -33,7 +35,8 @@
 Desktop/
 ├── Coinflip/                 # Web app (coinflipvp.com)
 ├── Coinflip-Telegram/        # Telegram bot (separate project)
-├── volt-bot-main/            # VolT Trading Bot source
+├── volt/volt/                # VoLT Web Platform (volumeterminal.com)
+├── volt-bot-main/            # VolT Telegram Trading Bot source
 ├── fugazi-bot/               # FUGAZI Trading Bot source
 └── Backups/2025-11-29/       # Daily backups
 ```
@@ -50,13 +53,19 @@ Desktop/
   - `voltbot.service` - VolT Trading Bot (`/opt/volt-bot`)
   - `fugazibot.service` - FUGAZI Trading Bot (`/opt/fugazi-bot`)
 
-### Coinflip Server
+### Web Apps Server (Coinflip + VoLT)
 - **IP:** 157.245.13.24
+- **Provider:** DigitalOcean
+- **OS:** Ubuntu
 - **Domains:**
-  - `coinflipvp.com` - Frontend (served from `/var/www/html`)
-  - `api.coinflipvp.com` - API (port 8000, `/opt/coinflip`)
+  - `coinflipvp.com` - Coinflip frontend (served from `/var/www/html`)
+  - `api.coinflipvp.com` - Coinflip API (port 8000, `/opt/coinflip`)
+  - `volumeterminal.com` - VoLT frontend (port 8080 via Docker)
+  - VoLT API runs on port 5000 via Docker
 - **Running Services:**
-  - `coinflip.service` - FastAPI backend
+  - `coinflip.service` - FastAPI backend (systemd)
+  - VoLT containers via Docker Compose (`/home/volt/volt/`)
+- **Nginx**: Reverse proxy for all domains (ports 80/443)
 
 ### Nginx Configuration
 ```nginx
@@ -188,10 +197,184 @@ POST /api/admin/sweep-escrows          - Sweep all escrow funds to treasury
 
 ---
 
-## VolT Trading Bot
+## VoLT Web Platform (Volume Terminal)
+
+### Overview
+Professional-grade Solana volume trading automation web platform. Enables users to generate trading activity for tokens through multi-wallet management, automated trading bots, and scheduled campaigns.
+
+**Live URL:** https://volumeterminal.com
+**Server:** 157.245.13.24 (`/home/volt/volt/`)
+**Deployment:** Docker Compose
+
+### Architecture
+```
+volt/volt/
+├── frontend/                 # React 18 app
+│   ├── src/
+│   │   ├── App.js           # Main router
+│   │   ├── Dashboard.js     # 7-tab interface
+│   │   ├── BotControls.js   # Volume bot controls
+│   │   ├── WalletManager.js # Multi-wallet UI
+│   │   ├── FundsManager.js  # Deposit/withdraw/distribute
+│   │   ├── CampaignManager.js # GOD MODE campaigns
+│   │   └── LaunchManagerNew.js # Token launches
+│   └── build/               # Production build
+├── backend/
+│   ├── src/
+│   │   ├── server.js        # Express app + background services
+│   │   ├── controllers/
+│   │   │   ├── auth.js      # Signup, login, JWT
+│   │   │   └── dashboard.js # All user operations
+│   │   ├── services/
+│   │   │   ├── solana.js    # Swaps, encryption, RPC management
+│   │   │   ├── bot.js       # Volume bot execution
+│   │   │   ├── pumpfun.js   # Token creation
+│   │   │   ├── campaignExecutor.js  # Background campaign runner
+│   │   │   └── schedulerEngine.js   # Campaign scheduler
+│   │   ├── models/          # MongoDB schemas
+│   │   └── middleware/      # Auth, rate limiting, validation
+│   └── scripts/
+│       └── migrate-encryption.js  # Key re-encryption tool
+└── docker-compose.yml       # Production config (GITIGNORED)
+```
+
+### Core Features
+
+**1. Multi-Wallet Management**
+- Auto-generate Solana wallets (5-100 based on tier)
+- All private keys encrypted with AES-256
+- Distribute/consolidate funds across wallets
+- Tier-based wallet limits
+
+**2. Volume Bot**
+Automated buy/sell trading with four modes:
+| Mode | Behavior |
+|------|----------|
+| Pure | Buy → Sell immediately (wash trading) |
+| Growth | Buy → Sell 90%, keep 10% |
+| Moonshot | Buy only (accumulation) |
+| Human | Random patterns (evade detection) |
+
+**3. Campaign System (GOD MODE)**
+- Schedule multi-stage trading campaigns
+- Auto-stop conditions (time, volume target, SOL depleted)
+- Active trading hours configuration
+- Wallet role assignment (buyer/seller/both)
+
+**4. Token Launch (Pump.fun Integration)**
+- Create token drafts with metadata
+- Upload images to IPFS
+- Deploy directly to Pump.fun
+- Post-launch volume workflows
+
+**5. Referral & Rewards System**
+- 4-level deep referral tracking
+- Tier-based fee discounts (10%-50%)
+- Tiers: Unranked → Bronze → Silver → Gold → Diamond
+
+### Fee Structure
+- **Inbound Fee:** 0.3% on trades (tier discounts apply)
+- **Outbound Fee:** 0.25% on withdrawals
+- **Fee Wallet:** `71thc93yHSqQGFhg8s95YdxbcbLksqM6b7e7ERm46Wht`
+- **Rewards Wallet:** `3U21AaoVePq3DqZPpTUuSf74cSrWkCZVdcD18rsVRCdk`
+
+### Tier System
+| Tier | Min Volume | Fee Discount | Max Wallets |
+|------|-----------|-------------|-------------|
+| Unranked | 0 SOL | 0% | 5 |
+| Bronze | 100 SOL | 10% | 15 |
+| Silver | 250 SOL | 20% | 30 |
+| Gold | 500 SOL | 30% | 50 |
+| Diamond | 1000 SOL | 50% | 100 |
+
+### API Endpoints
+```
+# Authentication
+POST /signup              - Create account (auto-gen wallet)
+POST /login               - Get JWT token
+
+# Wallets
+GET  /wallets/list        - List all wallets
+POST /wallets/add-one     - Generate new wallet
+POST /wallets/active      - Set active wallets
+GET  /wallets/deposit-address  - Get source wallet
+
+# Funds
+POST /funds/distribute    - Split to sub-wallets
+POST /funds/consolidate   - Collect from sub-wallets
+POST /funds/sell-all      - Liquidate token holdings
+
+# Bot
+POST /bot/start           - Start volume bot
+POST /bot/stop            - Stop bot
+GET  /bot/status          - Get status
+POST /settings/update     - Update bot config
+
+# Campaigns (GOD MODE)
+GET  /campaigns           - List campaigns
+POST /campaigns           - Create campaign
+POST /campaigns/:id/start - Start campaign
+POST /campaigns/:id/stop  - Stop campaign
+
+# Token Launch
+POST /draft-launches      - Create draft
+POST /draft-launches/:id/deploy  - Deploy to Pump.fun
+```
+
+### Security
+- JWT authentication (30-day expiry)
+- AES-256 encryption for all private keys
+- bcrypt password hashing
+- Rate limiting (5 limiters)
+- Joi input validation
+
+### Docker Deployment
+```bash
+# On server (157.245.13.24)
+cd /home/volt/volt
+docker-compose up -d
+
+# Containers:
+# - volt-frontend (port 8080:80)
+# - volt-backend (port 5000:5000)
+```
+
+### Environment Variables (docker-compose.yml)
+```env
+MONGO_URI=mongodb+srv://...
+JWT_SECRET=<secret>
+ENCRYPTION_SECRET=<secret>
+SOLANA_RPC=https://mainnet.helius-rpc.com/?api-key=...
+FEE_WALLET=71thc93yHSqQGFhg8s95YdxbcbLksqM6b7e7ERm46Wht
+REWARDS_WALLET_ADDRESS=3U21AaoVePq3DqZPpTUuSf74cSrWkCZVdcD18rsVRCdk
+REWARDS_PRIVATE_KEY=<base58>
+```
+
+### Key Technical Notes
+- **Swap Engine:** Jupiter Aggregator for optimal routing
+- **RPC:** Helius with failover to backup RPCs
+- **Database:** MongoDB Atlas
+- **Encryption:** CryptoJS AES-256 (different from Coinflip's Fernet)
+- **Background Services:** 3 engines run on startup (scheduler, campaign executor, workflow executor)
+
+### Update Procedure
+```bash
+# From local machine
+cd volt/volt
+git add . && git commit -m "update" && git push
+
+# On server
+ssh root@157.245.13.24 "cd /home/volt/volt && git pull && docker-compose up -d --build"
+```
+
+---
+
+## VolT Telegram Trading Bot
 
 ### Overview
 Professional Solana trading/sniper bot for Telegram with advanced features.
+
+**Note:** This is a DIFFERENT project from VoLT Web Platform above. Same name, different products.
 
 **Server:** 165.227.186.124 (`/opt/volt-bot`)
 **Service:** `systemctl status voltbot`
@@ -284,7 +467,8 @@ White-label fork of VolT for $FUGAZI community. Identical functionality, differe
 | Project | Platform Fee | Referral Share | Transaction Fee |
 |---------|-------------|----------------|-----------------|
 | **Coinflip** | 2% on wins | N/A | 0.025 SOL/player |
-| **VolT Bot** | 1.0% | 25% | Gas only |
+| **VoLT Web Platform** | 0.3% inbound, 0.25% outbound | 4-level (10-25%) | Gas only |
+| **VolT Telegram Bot** | 1.0% | 25% | Gas only |
 | **FUGAZI Bot** | 1.5% | 25% | Gas only |
 
 ### Treasury Wallet (All Projects)
@@ -449,9 +633,12 @@ N7G9UdmkpsFkyzJpT74NpJ3Dghjt1iBeL4mTtwCunL3
 ```
 Coinflip Game Fees ────────┐
                            │
-VolT Trading Fees ─────────┼──► Treasury Wallet (Ledger)
-                           │
+VolT Telegram Bot Fees ────┼──► Treasury Wallet (Ledger)
+                           │    N7G9UdmkpsFkyzJpT74NpJ3Dghjt1iBeL4mTtwCunL3
 FUGAZI Trading Fees ───────┘
+
+VoLT Web Platform Fees ────────► VoLT Fee Wallet
+                                 71thc93yHSqQGFhg8s95YdxbcbLksqM6b7e7ERm46Wht
 ```
 
 ---
@@ -485,7 +672,10 @@ ssh root@157.245.13.24 "cd /opt/coinflip && git pull && systemctl restart coinfl
 # Coinflip - Frontend only (no service restart needed)
 ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp -r frontend/* /var/www/html/"
 
-# VolT Bot
+# VoLT Web Platform (Docker)
+ssh root@157.245.13.24 "cd /home/volt/volt && git pull && docker-compose up -d --build"
+
+# VolT Telegram Bot
 ssh root@165.227.186.124 "cd /opt/volt-bot && git pull && systemctl restart voltbot"
 
 # FUGAZI Bot

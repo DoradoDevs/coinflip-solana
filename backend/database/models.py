@@ -142,6 +142,10 @@ class Wager:
     creator_deposit_tx: Optional[str] = None  # Signature of creator's deposit
     acceptor_deposit_tx: Optional[str] = None  # Signature of acceptor's deposit
 
+    # When accepting (tracks prepare-accept state)
+    acceptor_wallet: Optional[str] = None  # Wallet of user currently accepting
+    accepting_at: Optional[datetime] = None  # When prepare-accept was called (for timeout)
+
     # When accepted
     acceptor_id: Optional[int] = None
     game_id: Optional[str] = None

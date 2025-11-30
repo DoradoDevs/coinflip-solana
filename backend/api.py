@@ -277,6 +277,9 @@ class WagerResponse(BaseModel):
     created_at: str
     escrow_wallet: Optional[str] = None  # Returned during creation for deposit
     id: Optional[str] = None  # Alias for wager_id (frontend compatibility)
+    # Accepting state (for cancel button visibility)
+    is_accepting: bool = False  # True if someone is in the process of accepting
+    accepting_by: Optional[str] = None  # Wallet of user currently accepting
 
 
 # ===== UTILITY FUNCTIONS =====
@@ -1048,6 +1051,9 @@ async def get_open_wagers() -> List[WagerResponse]:
     """Get all open wagers."""
     wagers = db.get_open_wagers(limit=20)
 
+    # Timeout for accepting state (60 seconds)
+    ACCEPTING_TIMEOUT_SECONDS = 60
+
     result = []
     for w in wagers:
         # Get creator's username for display
@@ -1061,6 +1067,22 @@ async def get_open_wagers() -> List[WagerResponse]:
             if wallet_user and wallet_user.username:
                 creator_username = wallet_user.username
 
+        # Check if someone is actively accepting this wager (within timeout)
+        is_accepting = False
+        accepting_by = None
+        if w.accepting_at and w.acceptor_wallet:
+            time_since_accept = (datetime.utcnow() - w.accepting_at).total_seconds()
+            if time_since_accept < ACCEPTING_TIMEOUT_SECONDS:
+                is_accepting = True
+                accepting_by = w.acceptor_wallet
+            else:
+                # Timeout expired - clear accepting state
+                w.accepting_at = None
+                w.acceptor_wallet = None
+                w.acceptor_escrow_address = None
+                w.acceptor_escrow_secret = None
+                db.save_wager(w)
+
         result.append(WagerResponse(
             wager_id=w.wager_id,
             id=w.wager_id,  # Frontend uses 'id' for compatibility
@@ -1069,7 +1091,9 @@ async def get_open_wagers() -> List[WagerResponse]:
             creator_side=w.creator_side.value,
             amount=w.amount,
             status=w.status,
-            created_at=w.created_at.isoformat()
+            created_at=w.created_at.isoformat(),
+            is_accepting=is_accepting,
+            accepting_by=accepting_by
         ))
 
     return result
@@ -1113,9 +1137,17 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
         wager.acceptor_escrow_address = escrow_address
         wager.acceptor_escrow_secret = encrypted_secret
         wager.acceptor_wallet = request.acceptor_wallet
+        wager.accepting_at = datetime.utcnow()  # Track when accepting started
         db.save_wager(wager)
 
         logger.info(f"[PREPARE-ACCEPT] Wager {wager_id} - escrow {escrow_address} for acceptor {request.acceptor_wallet}")
+
+        # Broadcast to all clients that someone is accepting this wager
+        await manager.broadcast({
+            "type": "wager_accepting",
+            "wager_id": wager_id,
+            "acceptor_wallet": request.acceptor_wallet
+        })
 
         return {
             "success": True,
@@ -1130,6 +1162,49 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
     except Exception as e:
         logger.error(f"Prepare accept failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to prepare accept. Please try again.")
+
+
+class AbandonAcceptRequest(BaseModel):
+    acceptor_wallet: str
+
+
+@app.post("/api/wager/{wager_id}/abandon-accept")
+async def abandon_accept_wager(wager_id: str, request: AbandonAcceptRequest):
+    """Abandon accepting a wager - clears the accepting state.
+
+    Called when user closes the accept modal without completing the deposit.
+    """
+    try:
+        wager = db.get_wager(wager_id)
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
+
+        # Only the user who started accepting can abandon
+        if wager.acceptor_wallet != request.acceptor_wallet:
+            raise HTTPException(status_code=403, detail="Not authorized to abandon this acceptance")
+
+        # Clear accepting state
+        wager.accepting_at = None
+        wager.acceptor_wallet = None
+        wager.acceptor_escrow_address = None
+        wager.acceptor_escrow_secret = None
+        db.save_wager(wager)
+
+        logger.info(f"[ABANDON-ACCEPT] Wager {wager_id} - acceptor {request.acceptor_wallet} abandoned")
+
+        # Broadcast to all clients that accepting was abandoned
+        await manager.broadcast({
+            "type": "wager_abandon",
+            "wager_id": wager_id
+        })
+
+        return {"success": True, "message": "Acceptance abandoned"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Abandon accept failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to abandon accept.")
 
 
 @app.post("/api/wager/{wager_id}/accept")
@@ -1328,6 +1403,16 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
         # Can only cancel open wagers
         if wager.status != "open":
             raise HTTPException(status_code=400, detail="Can only cancel open wagers")
+
+        # Cannot cancel while someone is actively accepting (within 60 second timeout)
+        ACCEPTING_TIMEOUT_SECONDS = 60
+        if wager.accepting_at and wager.acceptor_wallet:
+            time_since_accept = (datetime.utcnow() - wager.accepting_at).total_seconds()
+            if time_since_accept < ACCEPTING_TIMEOUT_SECONDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot cancel while someone is accepting this wager. Please wait."
+                )
 
         # Verify escrow exists
         if not wager.creator_escrow_address or not wager.creator_escrow_secret:

@@ -483,16 +483,55 @@ async function loadActiveWagers() {
             const creatorDisplay = wager.creator_username ||
                 `${wager.creator_wallet.slice(0, 4)}...${wager.creator_wallet.slice(-4)}`;
 
+            // Check if current user is the creator
+            const isCreator = currentUser && currentUser.payout_wallet === wager.creator_wallet;
+            // Check if someone is accepting this wager
+            const isBeingAccepted = wager.is_accepting;
+
+            // Determine which button to show
+            let actionButton = '';
+            if (isCreator) {
+                if (isBeingAccepted) {
+                    // Someone is accepting - show disabled state
+                    actionButton = `
+                        <button class="btn btn-secondary" disabled style="opacity: 0.6;">
+                            Being Accepted...
+                        </button>
+                    `;
+                } else {
+                    // Creator can cancel their own wager
+                    actionButton = `
+                        <button class="btn btn-danger btn-cancel" onclick="cancelWager('${wager.id}')">
+                            Cancel
+                        </button>
+                    `;
+                }
+            } else {
+                if (isBeingAccepted) {
+                    // Someone else is accepting
+                    actionButton = `
+                        <button class="btn btn-secondary" disabled style="opacity: 0.6;">
+                            Being Accepted...
+                        </button>
+                    `;
+                } else {
+                    // Normal accept button
+                    actionButton = `
+                        <button class="btn btn-primary btn-accept" onclick="openAcceptModal('${wager.id}', ${wager.amount}, '${wager.creator_side}')">
+                            Accept (${opponentSide.toUpperCase()})
+                        </button>
+                    `;
+                }
+            }
+
             return `
                 <div class="wager-card" data-wager-id="${wager.id}">
                     <div class="wager-info">
                         <span class="wager-amount">${wager.amount} SOL</span>
                         <span class="wager-side">${wager.creator_side.toUpperCase()}</span>
-                        <span class="wager-creator">${creatorDisplay}</span>
+                        <span class="wager-creator">${creatorDisplay}${isCreator ? ' (You)' : ''}</span>
                     </div>
-                    <button class="btn btn-primary btn-accept" onclick="openAcceptModal('${wager.id}', ${wager.amount}, '${wager.creator_side}')">
-                        Accept (${opponentSide.toUpperCase()})
-                    </button>
+                    ${actionButton}
                 </div>
             `;
         }).join('');
@@ -780,7 +819,64 @@ function openAcceptModal(wagerId, amount, creatorSide) {
 }
 
 function closeAcceptModal() {
+    // If user was in the middle of accepting (escrow was created), abandon it
+    if (acceptWagerState.escrowAddress && acceptWagerState.acceptorWallet) {
+        // Call abandon endpoint (fire and forget with small delay for UX)
+        setTimeout(async () => {
+            try {
+                await fetch(`${API_BASE}/api/wager/${acceptWagerState.wagerId}/abandon-accept`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        acceptor_wallet: acceptWagerState.acceptorWallet
+                    })
+                });
+                console.log('Abandoned accept for wager:', acceptWagerState.wagerId);
+                loadActiveWagers(); // Refresh to show cancel button again
+            } catch (err) {
+                console.error('Failed to abandon accept:', err);
+            }
+        }, 3000); // 3 second delay as requested
+    }
     document.getElementById('acceptWagerModal').style.display = 'none';
+}
+
+/**
+ * Cancel an open wager (creator only)
+ */
+async function cancelWager(wagerId) {
+    if (!currentUser || !currentUser.payout_wallet) {
+        alert('You must be logged in to cancel a wager');
+        return;
+    }
+
+    if (!confirm('Are you sure you want to cancel this wager? Your wager amount will be refunded (minus the 0.025 SOL transaction fee).')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/wager/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                wager_id: wagerId,
+                creator_wallet: currentUser.payout_wallet
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to cancel wager');
+        }
+
+        const data = await response.json();
+        alert(`Wager cancelled! Refunded ${data.refund_amount} SOL to your wallet.`);
+        loadActiveWagers(); // Refresh the list
+
+    } catch (err) {
+        console.error('Cancel wager error:', err);
+        alert('Failed to cancel wager: ' + err.message);
+    }
 }
 
 async function continueToAcceptDeposit() {
