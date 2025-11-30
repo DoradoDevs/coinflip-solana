@@ -1004,7 +1004,7 @@ async function loadRecentGames() {
                 `${game.proof.blockhash.slice(0, 12)}...${game.proof.blockhash.slice(-8)}` : 'N/A';
 
             return `
-                <div class="recent-game-card" onclick="showProofModal('${game.game_id}', ${JSON.stringify(game.proof).replace(/"/g, '&quot;')})">
+                <div class="recent-game-card" onclick="showProofModal('${game.game_id}', ${JSON.stringify(game.proof).replace(/"/g, '&quot;')}, '${game.payout_tx || ''}')">
                     <div class="game-info">
                         <span class="game-result ${game.result}">${game.result.toUpperCase()}</span>
                         <span class="game-amount">${game.amount} SOL</span>
@@ -1037,7 +1037,7 @@ function getTimeAgo(date) {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-function showProofModal(gameId, proof) {
+function showProofModal(gameId, proof, payoutTx) {
     const modal = document.createElement('div');
     modal.className = 'modal proof-modal';
     modal.style.display = 'flex';
@@ -1093,9 +1093,9 @@ function showProofModal(gameId, proof) {
                 SHA256("${proof.blockhash}${gameId}") = ${proof.hash.slice(0, 20)}...</p>
             </div>
 
-            <a href="https://solscan.io/tx/${proof.blockhash}" target="_blank" class="btn btn-secondary">
-                View on Solscan
-            </a>
+            ${payoutTx ? `<a href="https://solscan.io/tx/${payoutTx}" target="_blank" class="btn btn-secondary">
+                View Payout on Solscan
+            </a>` : ''}
         </div>
     `;
 

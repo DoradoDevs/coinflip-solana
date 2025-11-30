@@ -807,6 +807,15 @@ async def get_recent_games(limit: int = 10) -> List[RecentGameResponse]:
                 winner_wallet = winner_user.connected_wallet or winner_user.payout_wallet or ""
                 winner_username = winner_user.username
 
+        # Fallback: use player wallets if winner_wallet still empty
+        if not winner_wallet:
+            # For PVP games, try to determine winner from result
+            if game.player1_wallet:
+                winner_wallet = game.player1_wallet  # Default to player1
+            if game.player2_wallet and game.result:
+                # If player1 picked a side that lost, player2 won
+                winner_wallet = game.player2_wallet if game.player2_wallet else game.player1_wallet
+
         # Fallback: look up by wallet if no username found
         if not winner_username and winner_wallet:
             wallet_user = db.get_user_by_wallet(winner_wallet)
