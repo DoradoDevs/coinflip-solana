@@ -1045,6 +1045,63 @@ async def get_open_wagers() -> List[WagerResponse]:
     return result
 
 
+class PrepareAcceptRequest(BaseModel):
+    acceptor_wallet: str
+
+
+@app.post("/api/wager/{wager_id}/prepare-accept")
+async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, http_request: Request):
+    """Prepare to accept a wager - returns escrow address for acceptor deposit.
+
+    Step 1 of accept flow: Get escrow address to deposit to.
+    """
+    check_emergency_stop()
+    check_rate_limit(http_request, "prepare_accept", max_requests=30, window_seconds=60)
+
+    try:
+        # Get the wager
+        wager = db.get_wager(wager_id)
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
+
+        if wager.status != "open":
+            raise HTTPException(status_code=400, detail=f"Wager is not open (status: {wager.status})")
+
+        # Can't accept own wager
+        if wager.creator_wallet == request.acceptor_wallet:
+            raise HTTPException(status_code=400, detail="Cannot accept your own wager")
+
+        # Generate escrow wallet for acceptor
+        escrow_address, escrow_secret = generate_wallet()
+        encrypted_secret = encrypt_secret(escrow_secret, ENCRYPTION_KEY)
+
+        # Calculate deposit amount (wager + fee buffer)
+        deposit_amount = wager.amount + TRANSACTION_FEE
+
+        # Store the pending accept info temporarily on the wager
+        # This will be finalized when they call the accept endpoint
+        wager.acceptor_escrow_address = escrow_address
+        wager.acceptor_escrow_secret = encrypted_secret
+        wager.acceptor_wallet = request.acceptor_wallet
+        db.save_wager(wager)
+
+        logger.info(f"[PREPARE-ACCEPT] Wager {wager_id} - escrow {escrow_address} for acceptor {request.acceptor_wallet}")
+
+        return {
+            "success": True,
+            "wager_id": wager_id,
+            "escrow_wallet": escrow_address,
+            "deposit_amount": deposit_amount,
+            "wager_amount": wager.amount
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Prepare accept failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to prepare accept. Please try again.")
+
+
 @app.post("/api/wager/accept")
 async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Request) -> GameResponse:
     """Accept a PVP wager with isolated escrow wallets.
