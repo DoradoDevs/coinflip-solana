@@ -155,11 +155,13 @@ def flip_coin(blockhash: str, game_id: str) -> CoinSide:
 
 ### API Endpoints
 ```
-GET  /api/wagers/open                  - List open wagers (includes creator username)
+GET  /api/wagers/open                  - List open wagers (includes is_accepting state)
 POST /api/wager/create                 - Create new wager (returns escrow address)
 POST /api/wager/{id}/verify-deposit    - Verify creator deposit → status: open
-POST /api/wager/{id}/prepare-accept    - Create acceptor escrow (returns escrow address)
+POST /api/wager/{id}/prepare-accept    - Create acceptor escrow, set accepting state
+POST /api/wager/{id}/abandon-accept    - Clear accepting state (user closed modal)
 POST /api/wager/{id}/accept            - Verify acceptor deposit & execute flip
+POST /api/wager/cancel                 - Cancel open wager (creator only, refunds deposit)
 GET  /api/games/recent                 - Recent completed games with proof + winner_username
 
 # Admin Endpoints
@@ -784,6 +786,27 @@ ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp -r frontend/* /var/ww
 ---
 
 ## Recent Changes (2025-11-29 & 2025-11-30)
+
+### Coinflip Web App (2025-11-30) - Session 3
+- **Cancel Button for Open Wagers**:
+  - Creator sees red "Cancel" button on their own wagers
+  - Clicking Cancel refunds wager amount (minus 0.025 SOL fee) to creator's wallet
+  - Added `cancelWager()` function in frontend
+  - Added `btn-danger` CSS style for cancel button
+- **Accepting State Tracking** (prevents cancel during accept):
+  - Added `accepting_at` timestamp and `acceptor_wallet` to Wager model
+  - `prepare-accept` sets these fields and broadcasts `wager_accepting` event
+  - Open wagers show "Being Accepted..." when someone is accepting
+  - 60-second timeout auto-clears stale accepting state
+  - `abandon-accept` endpoint clears state when user closes modal (3s delay)
+  - Cancel blocked while wager is being accepted
+- **New API Endpoints**:
+  - `POST /api/wager/{id}/abandon-accept` - Clear accepting state
+  - WagerResponse now includes `is_accepting` and `accepting_by` fields
+- **Support Form Requires Login**:
+  - General support/bug reports: Must be logged in, shows username + email from account (readonly)
+  - Password reset: Just asks for account email (no login needed - they forgot password)
+  - Admin always sees real user info linked to registered accounts
 
 ### Coinflip Web App (2025-11-30) - Session 2
 - **Username Display Fixes**:
