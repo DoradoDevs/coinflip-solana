@@ -12,6 +12,7 @@ from .solana_ops import (
 )
 from .escrow import (
     create_escrow_wallet,
+    verify_escrow_deposit,
     payout_from_escrow,
     collect_fees_from_escrow,
     refund_from_escrow,
@@ -34,6 +35,7 @@ __all__ = [
     "verify_deposit_transaction",
     "verify_deposit_to_escrow",
     "create_escrow_wallet",
+    "verify_escrow_deposit",
     "payout_from_escrow",
     "collect_fees_from_escrow",
     "refund_from_escrow",

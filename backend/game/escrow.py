@@ -129,6 +129,90 @@ async def create_escrow_wallet(
     return escrow_address, encrypted_secret, deposit_tx
 
 
+async def verify_escrow_deposit(
+    rpc_url: str,
+    escrow_address: str,
+    amount: float,
+    transaction_fee: float,
+    user_wallet: str,
+    deposit_tx_signature: str,
+    wager_id: str,
+    db
+) -> str:
+    """Verify deposit to an EXISTING escrow wallet (for accept flow).
+
+    Unlike create_escrow_wallet, this does NOT create a new wallet.
+    It verifies the deposit was sent to the escrow created by prepare-accept.
+
+    Args:
+        rpc_url: Solana RPC endpoint
+        escrow_address: EXISTING escrow wallet address
+        amount: Wager amount in SOL
+        transaction_fee: Fixed transaction fee (0.025 SOL)
+        user_wallet: User's wallet address (sender)
+        deposit_tx_signature: Transaction signature to verify
+        wager_id: Wager ID for tracking
+        db: Database instance
+
+    Returns:
+        Verified deposit_tx_signature
+
+    Raises:
+        Exception: If deposit verification fails or signature already used
+    """
+    total_required = amount + transaction_fee
+
+    if not deposit_tx_signature:
+        raise Exception(
+            f"Must provide transaction signature for deposit to escrow {escrow_address}"
+        )
+
+    # SECURITY: Check if signature already used
+    if db.signature_already_used(deposit_tx_signature):
+        used_sig = db.get_used_signature(deposit_tx_signature)
+        raise Exception(
+            f"Transaction signature already used for {used_sig.used_for} "
+            f"by {used_sig.user_wallet} at {used_sig.used_at}"
+        )
+
+    # Verify deposit on-chain against EXISTING escrow
+    is_valid = await verify_deposit_transaction(
+        rpc_url,
+        deposit_tx_signature,
+        user_wallet,  # sender
+        escrow_address,  # recipient (existing escrow from prepare-accept)
+        total_required  # amount
+    )
+
+    if not is_valid:
+        raise Exception(
+            f"Invalid deposit transaction. Please send exactly {total_required} SOL "
+            f"({amount} wager + {transaction_fee} fee) to escrow wallet {escrow_address}"
+        )
+
+    # SECURITY: Mark signature as used
+    db.save_used_signature(UsedSignature(
+        signature=deposit_tx_signature,
+        user_wallet=user_wallet,
+        used_for=wager_id,
+        used_at=datetime.utcnow()
+    ))
+
+    logger.info(f"[ESCROW] Verified deposit {total_required} SOL from {user_wallet} → existing escrow {escrow_address} (tx: {deposit_tx_signature})")
+
+    # Verify escrow balance
+    escrow_balance = await get_sol_balance(rpc_url, escrow_address)
+    logger.info(f"[ESCROW] Wallet {escrow_address} balance: {escrow_balance} SOL (required: {total_required} SOL)")
+
+    if escrow_balance < total_required:
+        raise Exception(
+            f"Escrow wallet underfunded: {escrow_balance} SOL available, "
+            f"{total_required} SOL required"
+        )
+
+    return deposit_tx_signature
+
+
 async def payout_from_escrow(
     rpc_url: str,
     escrow_secret: str,

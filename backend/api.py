@@ -27,6 +27,7 @@ from game import (
     verify_deposit_transaction,
     TRANSACTION_FEE,
     create_escrow_wallet,
+    verify_escrow_deposit,
     payout_from_escrow,
     collect_fees_from_escrow,
     refund_from_escrow,
@@ -1154,25 +1155,40 @@ async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http
 
         logger.info(f"[WAGER] Atomically accepted wager {wager.wager_id} by user {user.user_id}")
 
-        # SECURITY: Create unique escrow wallet for acceptor
-        escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
-            RPC_URL,
-            ENCRYPTION_KEY,
-            wager.amount,
-            TRANSACTION_FEE,
-            user,
-            request.acceptor_wallet,
-            request.deposit_tx_signature,
-            wager.wager_id,
-            db
-        )
+        # SECURITY: Use EXISTING escrow wallet from prepare-accept (not create new!)
+        if not wager.acceptor_escrow_address or not wager.acceptor_escrow_secret:
+            # Fallback: create escrow if somehow missing (shouldn't happen in normal flow)
+            logger.warning(f"[WAGER] No existing acceptor escrow for {wager.wager_id}, creating new one")
+            escrow_address, encrypted_secret, deposit_tx = await create_escrow_wallet(
+                RPC_URL,
+                ENCRYPTION_KEY,
+                wager.amount,
+                TRANSACTION_FEE,
+                user,
+                request.acceptor_wallet,
+                request.deposit_tx_signature,
+                wager.wager_id,
+                db
+            )
+            wager.acceptor_escrow_address = escrow_address
+            wager.acceptor_escrow_secret = encrypted_secret
+            wager.acceptor_deposit_tx = deposit_tx
+        else:
+            # Normal flow: verify deposit to EXISTING escrow from prepare-accept
+            logger.info(f"[WAGER] Using existing acceptor escrow {wager.acceptor_escrow_address}")
+            deposit_tx = await verify_escrow_deposit(
+                RPC_URL,
+                wager.acceptor_escrow_address,
+                wager.amount,
+                TRANSACTION_FEE,
+                request.acceptor_wallet,
+                request.deposit_tx_signature,
+                wager.wager_id,
+                db
+            )
+            wager.acceptor_deposit_tx = deposit_tx
 
-        logger.info(f"[ESCROW] Created acceptor escrow {escrow_address} for wager {wager.wager_id}")
-
-        # Update wager with acceptor's escrow details
-        wager.acceptor_escrow_address = escrow_address
-        wager.acceptor_escrow_secret = encrypted_secret
-        wager.acceptor_deposit_tx = deposit_tx
+        logger.info(f"[ESCROW] Acceptor escrow ready: {wager.acceptor_escrow_address} for wager {wager.wager_id}")
 
         # Play PVP game with isolated escrow wallets
         # All fees go to treasury, referral commissions paid from escrow
