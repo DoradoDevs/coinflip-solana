@@ -1708,10 +1708,17 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
 
     result = []
     for w in wagers:
+        # Get acceptor wallet from user if wager was accepted
+        acceptor_wallet = None
+        if w.acceptor_id:
+            acceptor = db.get_user(w.acceptor_id)
+            if acceptor:
+                acceptor_wallet = acceptor.payout_wallet or acceptor.connected_wallet
+
         wager_data = {
             "wager_id": w.wager_id,
             "creator_wallet": w.creator_wallet,
-            "acceptor_wallet": w.acceptor_wallet,
+            "acceptor_wallet": acceptor_wallet,
             "creator_side": w.creator_side.value if w.creator_side else None,
             "amount": w.amount,
             "status": w.status,
