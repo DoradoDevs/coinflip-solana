@@ -435,9 +435,17 @@
                 <h2 id="supportModalTitle">Contact Support</h2>
 
                 <form id="supportForm" onsubmit="submitSupportTicket(event)">
-                    <div class="form-group">
-                        <label>Your Email</label>
-                        <input type="email" id="supportEmail" class="form-input" placeholder="your@email.com" required>
+                    <!-- Account Info (readonly - pulled from logged in user) -->
+                    <div id="supportAccountInfo" class="form-group" style="background: var(--surface-light); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="color: var(--text-muted);">Username:</span>
+                            <span id="supportUsername" style="font-weight: 600;">-</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="color: var(--text-muted);">Email:</span>
+                            <span id="supportEmailDisplay" style="font-weight: 600;">-</span>
+                        </div>
+                        <input type="hidden" id="supportEmail">
                     </div>
 
                     <div class="form-group">

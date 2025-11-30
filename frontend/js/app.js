@@ -1278,8 +1278,18 @@ function showSupportModal(ticketType = 'support') {
     const typeSelect = document.getElementById('supportType');
     const subjectInput = document.getElementById('supportSubject');
     const messageInput = document.getElementById('supportMessage');
-    const emailInput = document.getElementById('supportEmail');
+    const accountInfoDiv = document.getElementById('supportAccountInfo');
     const statusEl = document.getElementById('supportStatus');
+
+    // Password reset is special - users who forgot password can't log in
+    const isPasswordReset = ticketType === 'password_reset';
+
+    // REQUIRE LOGIN for non-password-reset support
+    if (!isPasswordReset && (!currentUser || !currentUser.email)) {
+        alert('Please log in to contact support.');
+        showLoginModal();
+        return;
+    }
 
     // Reset form
     document.getElementById('supportForm').reset();
@@ -1288,20 +1298,36 @@ function showSupportModal(ticketType = 'support') {
     // Set type based on parameter
     typeSelect.value = ticketType;
 
-    // Set title based on type
-    if (ticketType === 'password_reset') {
+    // Set title and content based on type
+    if (isPasswordReset) {
         titleEl.textContent = 'Password Reset Request';
         subjectInput.value = 'Password Reset Request';
-        messageInput.placeholder = 'Please enter your account email and any additional information...';
+        messageInput.placeholder = 'Any additional info (optional)...';
+
+        // For password reset - ask for email (they know their account email)
+        accountInfoDiv.innerHTML = `
+            <label style="color: var(--text-muted); margin-bottom: 8px; display: block;">Email associated with your account</label>
+            <input type="email" id="supportEmail" class="form-input" placeholder="your@email.com" required>
+        `;
+        accountInfoDiv.style.display = 'block';
     } else {
         titleEl.textContent = 'Contact Support';
         subjectInput.value = '';
         messageInput.placeholder = 'Describe your issue in detail...';
-    }
 
-    // Pre-fill email if logged in
-    if (currentUser && currentUser.email) {
-        emailInput.value = currentUser.email;
+        // Auto-fill from logged in user (readonly display)
+        accountInfoDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: var(--text-muted);">Username:</span>
+                <span style="font-weight: 600;">${currentUser.username || currentUser.display_name || 'N/A'}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-muted);">Email:</span>
+                <span style="font-weight: 600;">${currentUser.email}</span>
+            </div>
+            <input type="hidden" id="supportEmail" value="${currentUser.email}">
+        `;
+        accountInfoDiv.style.display = 'block';
     }
 
     modal.style.display = 'flex';
