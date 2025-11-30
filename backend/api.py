@@ -1653,7 +1653,7 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
             "status": w.status,
             "escrow_address": w.creator_escrow_address,
             "created_at": w.created_at.isoformat() if w.created_at else None,
-            "acceptor_wallet": w.acceptor_wallet,
+            "acceptor_id": w.acceptor_id,
         }
 
         # Check escrow balance for pending wagers
