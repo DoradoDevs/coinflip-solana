@@ -271,27 +271,44 @@ async def collect_fees_from_escrow(
     Raises:
         Exception: If transfer fails
     """
-    # Check remaining balance
-    escrow_balance = await get_sol_balance(rpc_url, escrow_address)
-    logger.info(f"[ESCROW] Collecting remaining balance from {escrow_address}: {escrow_balance} SOL")
+    import asyncio
 
-    # Keep rent-exempt minimum (following VolT's pattern)
-    if escrow_balance <= RENT_EXEMPT_SOL:
-        logger.info(f"[ESCROW] Balance too low to collect ({escrow_balance} SOL ≤ {RENT_EXEMPT_SOL} SOL), leaving as dust")
-        return None
+    # IMPORTANT: Wait for previous transactions to be confirmed on-chain
+    # This prevents stale RPC balance from causing "insufficient lamports" errors
+    await asyncio.sleep(2)
 
-    # Transfer remaining balance to house
-    amount_to_collect = escrow_balance - RENT_EXEMPT_SOL
+    # Check remaining balance with retry (RPC can return stale data)
+    max_retries = 3
+    for attempt in range(max_retries):
+        escrow_balance = await get_sol_balance(rpc_url, escrow_address)
+        logger.info(f"[ESCROW] Balance check attempt {attempt+1}: {escrow_address} has {escrow_balance} SOL")
 
-    fee_tx = await transfer_sol(
-        rpc_url,
-        escrow_secret,
-        house_wallet,
-        amount_to_collect
-    )
+        # Keep rent-exempt minimum (following VolT's pattern)
+        if escrow_balance <= RENT_EXEMPT_SOL:
+            logger.info(f"[ESCROW] Balance too low to collect ({escrow_balance} SOL ≤ {RENT_EXEMPT_SOL} SOL), leaving as dust")
+            return None
 
-    logger.info(f"[REAL MAINNET] Collected {amount_to_collect} SOL from escrow {escrow_address} → house {house_wallet} (tx: {fee_tx})")
-    return fee_tx
+        # Transfer remaining balance to house
+        amount_to_collect = escrow_balance - RENT_EXEMPT_SOL
+
+        try:
+            fee_tx = await transfer_sol(
+                rpc_url,
+                escrow_secret,
+                house_wallet,
+                amount_to_collect
+            )
+            logger.info(f"[REAL MAINNET] Collected {amount_to_collect} SOL from escrow {escrow_address} → house {house_wallet} (tx: {fee_tx})")
+            return fee_tx
+        except Exception as e:
+            if "insufficient lamports" in str(e).lower() and attempt < max_retries - 1:
+                logger.warning(f"[ESCROW] Insufficient lamports, waiting for chain sync (attempt {attempt+1}/{max_retries})")
+                await asyncio.sleep(3)  # Wait longer for chain to sync
+                continue
+            raise
+
+    logger.error(f"[ESCROW] Failed to collect fees after {max_retries} attempts")
+    return None
 
 
 async def refund_from_escrow(
