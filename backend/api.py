@@ -1711,23 +1711,33 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
         wager_data = {
             "wager_id": w.wager_id,
             "creator_wallet": w.creator_wallet,
+            "acceptor_wallet": w.acceptor_wallet,
             "creator_side": w.creator_side.value if w.creator_side else None,
             "amount": w.amount,
             "status": w.status,
             "escrow_address": w.creator_escrow_address,
+            "acceptor_escrow_address": w.acceptor_escrow_address,
             "created_at": w.created_at.isoformat() if w.created_at else None,
             "acceptor_id": w.acceptor_id,
         }
 
-        # Check escrow balance for ANY wager with an escrow (for recovery purposes)
+        # Check creator escrow balance
         if w.creator_escrow_address:
             try:
                 balance = await get_sol_balance(RPC_URL, w.creator_escrow_address)
                 wager_data["escrow_balance"] = balance
-                logger.info(f"[ADMIN] Wager {w.wager_id} escrow {w.creator_escrow_address}: {balance} SOL")
             except Exception as e:
-                logger.error(f"[ADMIN] Failed to check balance for {w.wager_id}: {e}")
+                logger.error(f"[ADMIN] Failed to check creator escrow for {w.wager_id}: {e}")
                 wager_data["escrow_balance"] = None
+
+        # Check acceptor escrow balance
+        if w.acceptor_escrow_address:
+            try:
+                acceptor_balance = await get_sol_balance(RPC_URL, w.acceptor_escrow_address)
+                wager_data["acceptor_escrow_balance"] = acceptor_balance
+            except Exception as e:
+                logger.error(f"[ADMIN] Failed to check acceptor escrow for {w.wager_id}: {e}")
+                wager_data["acceptor_escrow_balance"] = None
 
         result.append(wager_data)
 
@@ -1847,6 +1857,89 @@ async def admin_cancel_wager(wager_id: str, http_request: Request):
         "success": True,
         "message": f"Wager {wager_id} cancelled",
         "wager_id": wager_id
+    }
+
+
+class AdminRecoverRequest(BaseModel):
+    destination_wallet: str
+    escrow_type: str = "creator"  # "creator" or "acceptor"
+
+
+@app.post("/api/admin/wager/{wager_id}/recover")
+async def admin_recover_escrow(wager_id: str, request: AdminRecoverRequest, http_request: Request):
+    """Recover funds from any escrow to any destination wallet (admin only).
+
+    escrow_type: "creator" or "acceptor"
+    destination_wallet: Any valid Solana wallet address
+    """
+    admin = require_admin(http_request)
+
+    from utils import decrypt_secret
+
+    wager = db.get_wager(wager_id)
+    if not wager:
+        raise HTTPException(status_code=404, detail="Wager not found")
+
+    # Determine which escrow to recover from
+    if request.escrow_type == "acceptor":
+        escrow_address = wager.acceptor_escrow_address
+        escrow_secret_encrypted = wager.acceptor_escrow_secret
+        escrow_label = "acceptor"
+    else:
+        escrow_address = wager.creator_escrow_address
+        escrow_secret_encrypted = wager.creator_escrow_secret
+        escrow_label = "creator"
+
+    if not escrow_address or not escrow_secret_encrypted:
+        raise HTTPException(status_code=400, detail=f"No {escrow_label} escrow found for this wager")
+
+    # Check balance
+    try:
+        balance = await get_sol_balance(RPC_URL, escrow_address)
+        logger.info(f"[RECOVER] {escrow_label} escrow {escrow_address} balance: {balance} SOL")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check escrow balance: {e}")
+
+    if balance < 0.001:
+        return {
+            "success": True,
+            "message": f"No balance in {escrow_label} escrow ({balance} SOL)",
+            "wager_id": wager_id,
+            "recovered_amount": 0
+        }
+
+    # Decrypt escrow secret
+    try:
+        escrow_secret = decrypt_secret(escrow_secret_encrypted, ENCRYPTION_KEY)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to decrypt {escrow_label} escrow: {e}")
+
+    # Calculate recovery amount
+    recovery_amount = balance - 0.000005
+
+    # Execute transfer
+    logger.info(f"[RECOVER] Sending {recovery_amount} SOL from {escrow_label} escrow to {request.destination_wallet}")
+    try:
+        tx_sig = await transfer_sol(
+            RPC_URL,
+            escrow_secret,
+            request.destination_wallet,
+            recovery_amount
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recovery transfer failed: {e}")
+
+    logger.info(f"Admin {admin.email} recovered {recovery_amount} SOL from {escrow_label} escrow of wager {wager_id} to {request.destination_wallet}")
+
+    return {
+        "success": True,
+        "message": f"Recovered {recovery_amount:.6f} SOL from {escrow_label} escrow to {request.destination_wallet}",
+        "wager_id": wager_id,
+        "escrow_type": escrow_label,
+        "recovered_amount": recovery_amount,
+        "destination": request.destination_wallet,
+        "tx_signature": tx_sig,
+        "solscan_url": f"https://solscan.io/tx/{tx_sig}"
     }
 
 

@@ -498,11 +498,11 @@
                     <tr>
                         <th>Wager ID</th>
                         <th>Creator</th>
+                        <th>Acceptor</th>
                         <th>Amount</th>
-                        <th>Side</th>
                         <th>Status</th>
-                        <th>Escrow</th>
-                        <th>Balance</th>
+                        <th>Creator Escrow</th>
+                        <th>Acceptor Escrow</th>
                         <th>Created</th>
                         <th>Actions</th>
                     </tr>
@@ -822,31 +822,46 @@
             tbody.innerHTML = wagers.map(w => {
                 const creatorShort = w.creator_wallet ?
                     `${w.creator_wallet.slice(0, 4)}...${w.creator_wallet.slice(-4)}` : '-';
+                const acceptorShort = w.acceptor_wallet ?
+                    `${w.acceptor_wallet.slice(0, 4)}...${w.acceptor_wallet.slice(-4)}` : '-';
                 const escrowShort = w.escrow_address ?
                     `${w.escrow_address.slice(0, 4)}...${w.escrow_address.slice(-4)}` : '-';
-                const hasBalance = w.escrow_balance !== undefined && w.escrow_balance !== null;
-                const balance = hasBalance ? `${w.escrow_balance.toFixed(4)} SOL` : '-';
-                const hasFunds = hasBalance && w.escrow_balance > 0.001;
+                const acceptorEscrowShort = w.acceptor_escrow_address ?
+                    `${w.acceptor_escrow_address.slice(0, 4)}...${w.acceptor_escrow_address.slice(-4)}` : '-';
 
-                // Show Recover button for ANY wager with funds - admin can always recover
-                let actionBtn = '-';
-                if (hasFunds) {
-                    actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Recover</button>`;
+                // Creator escrow balance
+                const hasCreatorBalance = w.escrow_balance !== undefined && w.escrow_balance !== null;
+                const creatorBalance = hasCreatorBalance ? w.escrow_balance.toFixed(4) : '-';
+                const creatorHasFunds = hasCreatorBalance && w.escrow_balance > 0.001;
+
+                // Acceptor escrow balance
+                const hasAcceptorBalance = w.acceptor_escrow_balance !== undefined && w.acceptor_escrow_balance !== null;
+                const acceptorBalance = hasAcceptorBalance ? w.acceptor_escrow_balance.toFixed(4) : '-';
+                const acceptorHasFunds = hasAcceptorBalance && w.acceptor_escrow_balance > 0.001;
+
+                // Build action buttons
+                let actions = [];
+                if (creatorHasFunds) {
+                    actions.push(`<button class="action-btn danger" onclick="recoverEscrow('${w.wager_id}', 'creator')" title="Recover creator escrow">Creator</button>`);
                 }
+                if (acceptorHasFunds) {
+                    actions.push(`<button class="action-btn danger" onclick="recoverEscrow('${w.wager_id}', 'acceptor')" title="Recover acceptor escrow">Acceptor</button>`);
+                }
+                const actionBtn = actions.length > 0 ? actions.join(' ') : '-';
 
                 return `
                     <tr>
                         <td><code style="font-size: 0.75rem;">${w.wager_id}</code></td>
                         <td title="${w.creator_wallet}">${creatorShort}</td>
+                        <td title="${w.acceptor_wallet || ''}">${acceptorShort}</td>
                         <td>${w.amount} SOL</td>
-                        <td>${w.creator_side || '-'}</td>
                         <td><span class="badge badge-${w.status}">${w.status}</span></td>
                         <td>
-                            <a href="https://solscan.io/account/${w.escrow_address}" target="_blank" title="${w.escrow_address}">
-                                ${escrowShort}
-                            </a>
+                            ${w.escrow_address ? `<a href="https://solscan.io/account/${w.escrow_address}" target="_blank" title="${w.escrow_address}">${escrowShort}</a><br><small>${creatorBalance} SOL</small>` : '-'}
                         </td>
-                        <td>${balance}</td>
+                        <td>
+                            ${w.acceptor_escrow_address ? `<a href="https://solscan.io/account/${w.acceptor_escrow_address}" target="_blank" title="${w.acceptor_escrow_address}">${acceptorEscrowShort}</a><br><small>${acceptorBalance} SOL</small>` : '-'}
+                        </td>
                         <td>${formatDate(w.created_at)}</td>
                         <td>${actionBtn}</td>
                     </tr>
@@ -879,6 +894,50 @@
             } catch (err) {
                 console.error('Failed to refund wager:', err);
                 alert('Error: ' + (err.message || 'Failed to refund wager'));
+            }
+        }
+
+        async function recoverEscrow(wagerId, escrowType) {
+            const destination = prompt(`Recover ${escrowType} escrow for ${wagerId}\n\nEnter destination wallet address:`);
+
+            if (!destination) return;
+
+            if (destination.length < 32 || destination.length > 44) {
+                alert('Invalid wallet address');
+                return;
+            }
+
+            if (!confirm(`Recover ${escrowType} escrow funds?\n\nDestination: ${destination}\n\nThis will transfer ALL funds from the ${escrowType} escrow to the specified wallet.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/recover`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        destination_wallet: destination,
+                        escrow_type: escrowType
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    if (data.recovered_amount > 0) {
+                        alert(`Recovery successful!\n\nAmount: ${data.recovered_amount.toFixed(6)} SOL\nFrom: ${data.escrow_type} escrow\nTo: ${data.destination}\nTX: ${data.tx_signature}\n\nView on Solscan: ${data.solscan_url}`);
+                    } else {
+                        alert(`No funds to recover.\n\n${data.message}`);
+                    }
+                    loadWagers();
+                } else {
+                    throw new Error(data.detail || 'Recovery failed');
+                }
+            } catch (err) {
+                console.error('Failed to recover escrow:', err);
+                alert('Error: ' + (err.message || 'Failed to recover escrow'));
             }
         }
 
