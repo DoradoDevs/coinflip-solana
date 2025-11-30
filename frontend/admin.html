@@ -824,10 +824,20 @@
                     `${w.creator_wallet.slice(0, 4)}...${w.creator_wallet.slice(-4)}` : '-';
                 const escrowShort = w.escrow_address ?
                     `${w.escrow_address.slice(0, 4)}...${w.escrow_address.slice(-4)}` : '-';
-                const balance = w.escrow_balance !== undefined ?
-                    `${w.escrow_balance.toFixed(4)} SOL` : '-';
-                const canRefund = (w.status === 'pending_deposit' || w.status === 'open') &&
-                                  w.escrow_balance && w.escrow_balance > 0.001;
+                const balance = w.escrow_balance !== undefined && w.escrow_balance !== null ?
+                    `${w.escrow_balance.toFixed(4)} SOL` : 'checking...';
+                const isPendingOrOpen = w.status === 'pending_deposit' || w.status === 'open';
+                const hasBalance = w.escrow_balance && w.escrow_balance > 0.001;
+
+                // Determine action button
+                let actionBtn = '-';
+                if (isPendingOrOpen) {
+                    if (hasBalance) {
+                        actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>`;
+                    } else {
+                        actionBtn = `<button class="action-btn secondary" onclick="cancelWager('${w.wager_id}')">Cancel</button>`;
+                    }
+                }
 
                 return `
                     <tr>
@@ -843,9 +853,7 @@
                         </td>
                         <td>${balance}</td>
                         <td>${formatDate(w.created_at)}</td>
-                        <td>
-                            ${canRefund ? `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>` : '-'}
-                        </td>
+                        <td>${actionBtn}</td>
                     </tr>
                 `;
             }).join('');
@@ -872,6 +880,30 @@
             } catch (err) {
                 console.error('Failed to refund wager:', err);
                 alert('Error: ' + (err.message || 'Failed to refund wager'));
+            }
+        }
+
+        async function cancelWager(wagerId) {
+            if (!confirm(`Cancel wager ${wagerId}? This will mark it as cancelled (no funds will be transferred).`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/cancel`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(`Wager ${wagerId} cancelled successfully.`);
+                    loadWagers();
+                } else {
+                    throw new Error(data.detail || 'Cancel failed');
+                }
+            } catch (err) {
+                console.error('Failed to cancel wager:', err);
+                alert('Error: ' + (err.message || 'Failed to cancel wager'));
             }
         }
 

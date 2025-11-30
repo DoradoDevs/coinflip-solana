@@ -1656,12 +1656,14 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
             "acceptor_id": w.acceptor_id,
         }
 
-        # Check escrow balance for pending wagers
-        if w.status == "pending_deposit" and w.creator_escrow_address:
+        # Check escrow balance for pending/open wagers (any wager with an escrow)
+        if w.status in ["pending_deposit", "open"] and w.creator_escrow_address:
             try:
                 balance = await get_sol_balance(RPC_URL, w.creator_escrow_address)
                 wager_data["escrow_balance"] = balance
-            except:
+                logger.info(f"[ADMIN] Wager {w.wager_id} escrow {w.creator_escrow_address}: {balance} SOL")
+            except Exception as e:
+                logger.error(f"[ADMIN] Failed to check balance for {w.wager_id}: {e}")
                 wager_data["escrow_balance"] = None
 
         result.append(wager_data)
@@ -1741,6 +1743,32 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
         "refunded_amount": refund_amount,
         "tx_signature": tx_sig,
         "solscan_url": f"https://solscan.io/tx/{tx_sig}"
+    }
+
+
+@app.post("/api/admin/wager/{wager_id}/cancel")
+async def admin_cancel_wager(wager_id: str, http_request: Request):
+    """Cancel a pending wager without transferring funds (admin only)."""
+    admin = require_admin(http_request)
+
+    # Get wager
+    wager = db.get_wager(wager_id)
+    if not wager:
+        raise HTTPException(status_code=404, detail="Wager not found")
+
+    if wager.status not in ["pending_deposit", "open"]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel wager with status: {wager.status}")
+
+    # Update wager status
+    wager.status = "cancelled"
+    db.save_wager(wager)
+
+    logger.info(f"Admin {admin.email} cancelled wager {wager_id}")
+
+    return {
+        "success": True,
+        "message": f"Wager {wager_id} cancelled",
+        "wager_id": wager_id
     }
 
 
