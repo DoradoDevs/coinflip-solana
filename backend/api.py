@@ -1677,7 +1677,7 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
 
 @app.post("/api/admin/wager/{wager_id}/refund")
 async def admin_refund_wager(wager_id: str, http_request: Request):
-    """Refund a pending wager to the creator (admin only)."""
+    """Refund a pending wager to the creator's payout wallet (admin only)."""
     admin = require_admin(http_request)
 
     from utils import decrypt_secret
@@ -1693,9 +1693,19 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
     if not wager.creator_escrow_address or not wager.creator_escrow_secret:
         raise HTTPException(status_code=400, detail="Wager has no escrow wallet")
 
+    # Get creator's payout wallet (preferred) or fall back to creator_wallet
+    creator = db.get_user(wager.creator_id)
+    refund_destination = wager.creator_wallet  # default fallback
+    if creator and creator.payout_wallet:
+        refund_destination = creator.payout_wallet
+        logger.info(f"[REFUND] Using creator's payout wallet: {refund_destination}")
+    else:
+        logger.info(f"[REFUND] No payout wallet set, using creator wallet: {refund_destination}")
+
     # Check escrow balance
     try:
         balance = await get_sol_balance(RPC_URL, wager.creator_escrow_address)
+        logger.info(f"[REFUND] Escrow {wager.creator_escrow_address} balance: {balance} SOL")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check escrow balance: {e}")
 
@@ -1719,12 +1729,13 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
     # Calculate refund (leave tiny amount for tx fee)
     refund_amount = balance - 0.000005
 
-    # Execute refund
+    # Execute refund to payout wallet
+    logger.info(f"[REFUND] Sending {refund_amount} SOL to {refund_destination}")
     try:
         tx_sig = await transfer_sol(
             RPC_URL,
             escrow_secret,
-            wager.creator_wallet,
+            refund_destination,
             refund_amount
         )
     except Exception as e:
@@ -1734,13 +1745,14 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
     wager.status = "refunded"
     db.save_wager(wager)
 
-    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {refund_amount} SOL to {wager.creator_wallet}")
+    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {refund_amount} SOL to {refund_destination}")
 
     return {
         "success": True,
-        "message": f"Refunded {refund_amount:.6f} SOL to {wager.creator_wallet}",
+        "message": f"Refunded {refund_amount:.6f} SOL to {refund_destination}",
         "wager_id": wager_id,
         "refunded_amount": refund_amount,
+        "refund_destination": refund_destination,
         "tx_signature": tx_sig,
         "solscan_url": f"https://solscan.io/tx/{tx_sig}"
     }

@@ -827,16 +827,11 @@
                 const balance = w.escrow_balance !== undefined && w.escrow_balance !== null ?
                     `${w.escrow_balance.toFixed(4)} SOL` : 'checking...';
                 const isPendingOrOpen = w.status === 'pending_deposit' || w.status === 'open';
-                const hasBalance = w.escrow_balance && w.escrow_balance > 0.001;
 
-                // Determine action button
+                // Show Refund button for all pending/open wagers - backend handles both cases
                 let actionBtn = '-';
                 if (isPendingOrOpen) {
-                    if (hasBalance) {
-                        actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>`;
-                    } else {
-                        actionBtn = `<button class="action-btn secondary" onclick="cancelWager('${w.wager_id}')">Cancel</button>`;
-                    }
+                    actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>`;
                 }
 
                 return `
@@ -860,7 +855,7 @@
         }
 
         async function refundWager(wagerId) {
-            if (!confirm(`Refund wager ${wagerId}? This will send the escrow balance back to the creator.`)) {
+            if (!confirm(`Refund wager ${wagerId}?\n\nThis will:\n- Check escrow balance\n- Return any funds to creator's payout wallet\n- Mark wager as refunded`)) {
                 return;
             }
 
@@ -872,7 +867,11 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    alert(`Refund successful!\n\nAmount: ${data.refunded_amount.toFixed(6)} SOL\nTX: ${data.tx_signature}\n\nView on Solscan: ${data.solscan_url}`);
+                    if (data.refunded_amount > 0) {
+                        alert(`Refund successful!\n\nAmount: ${data.refunded_amount.toFixed(6)} SOL\nTX: ${data.tx_signature}\n\nView on Solscan: ${data.solscan_url}`);
+                    } else {
+                        alert(`Wager marked as refunded.\n\n${data.message}`);
+                    }
                     loadWagers();
                 } else {
                     throw new Error(data.detail || 'Refund failed');
@@ -880,30 +879,6 @@
             } catch (err) {
                 console.error('Failed to refund wager:', err);
                 alert('Error: ' + (err.message || 'Failed to refund wager'));
-            }
-        }
-
-        async function cancelWager(wagerId) {
-            if (!confirm(`Cancel wager ${wagerId}? This will mark it as cancelled (no funds will be transferred).`)) {
-                return;
-            }
-
-            try {
-                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/cancel`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    alert(`Wager ${wagerId} cancelled successfully.`);
-                    loadWagers();
-                } else {
-                    throw new Error(data.detail || 'Cancel failed');
-                }
-            } catch (err) {
-                console.error('Failed to cancel wager:', err);
-                alert('Error: ' + (err.message || 'Failed to cancel wager'));
             }
         }
 
