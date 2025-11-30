@@ -1,5 +1,5 @@
 # DoradoDevs Master Knowledge Document
-**Last Updated:** 2025-11-29
+**Last Updated:** 2025-11-30
 **Status:** Production - All Systems Operational
 
 ---
@@ -146,18 +146,21 @@ def flip_coin(blockhash: str, game_id: str) -> CoinSide:
 
 ### API Endpoints
 ```
-GET  /api/wagers/open                  - List open wagers
+GET  /api/wagers/open                  - List open wagers (includes creator username)
 POST /api/wager/create                 - Create new wager (returns escrow address)
 POST /api/wager/{id}/verify-deposit    - Verify creator deposit → status: open
 POST /api/wager/{id}/prepare-accept    - Create acceptor escrow (returns escrow address)
 POST /api/wager/{id}/accept            - Verify acceptor deposit & execute flip
-GET  /api/games/recent                 - Recent completed games with proof
+GET  /api/games/recent                 - Recent completed games with proof + winner_username
 
 # Admin Endpoints
 GET  /api/admin/wagers                 - List all wagers with balances
 POST /api/admin/wager/{id}/refund      - Refund escrow to payout wallet
 POST /api/admin/wager/{id}/cancel      - Mark wager as cancelled
 POST /api/admin/wager/{id}/export-key  - Export escrow private key
+GET  /api/admin/maintenance            - Check maintenance mode status
+POST /api/admin/maintenance/toggle     - Enable/disable all betting (EMERGENCY_STOP file)
+POST /api/admin/sweep-escrows          - Sweep all escrow funds to treasury
 ```
 
 ### Complete Wager Flow (CRITICAL - Read Carefully)
@@ -530,6 +533,19 @@ fuser -k 8000/tcp  # Then restart service
 - **Cause**: Request body doesn't match expected schema
 - **Fix**: Check AcceptWagerRequest model in api.py (wager_id is in URL path, not body)
 
+**"AttributeError: 'Wager' object has no attribute 'id'"**
+- **Cause**: Using `wager.id` instead of `wager.wager_id`
+- **Fix**: Wager model uses `wager_id` field, not `id`
+- **Files**: Check api.py for any `wager.id` references
+
+**"insufficient lamports" during fee collection**
+- **Cause**: RPC returns stale balance after payout transaction
+- **Fix**: Delay increased to 10s + 3 retries in `collect_fees_from_escrow()`
+
+**Solscan link shows "Unable to locate"**
+- **Cause**: Using blockhash instead of transaction signature
+- **Fix**: Use `payout_tx` field for Solscan links, not `proof.blockhash`
+
 ### Key Files Reference
 ```
 backend/
@@ -546,6 +562,34 @@ backend/
 - **Refund**: Transfers escrow funds to creator/acceptor payout wallet
 - **Cancel**: Marks wager as cancelled (use after refund)
 - **Export**: Shows escrow private key for manual recovery
+- **Maintenance Mode**: Toggle button to disable all betting (creates/removes EMERGENCY_STOP file)
+- **Sweep All Escrows**: Collects all leftover funds from escrow wallets to treasury
+
+### Solana RPC Sync Issues
+**Problem**: After payout, RPC may return stale balance data causing "insufficient lamports" errors when collecting fees.
+
+**Solution** (in `collect_fees_from_escrow()`):
+1. Wait 10 seconds after payout for chain finality
+2. Retry up to 3 times with 5-second delays between attempts
+3. Leave rent-exempt minimum (~0.00089 SOL) as dust
+
+**Manual Recovery**: Use "Sweep All Escrows" button in admin panel to collect any leftover funds periodically.
+
+### Frontend Deployment Gotchas
+**Browser Cache**: After frontend updates, users may see old JavaScript. Solutions:
+- Hard refresh: `Ctrl+Shift+R` (Windows) or `Cmd+Shift+R` (Mac)
+- Clear browser cache
+- Wait for cache expiry
+
+**Two-Directory Setup**: Remember Coinflip server has TWO locations:
+- `/opt/coinflip` - Git repo (source code)
+- `/var/www/html` - Nginx serves frontend from here
+- **Must copy**: `cp -r frontend/* /var/www/html/` after `git pull`
+
+**Quick Deploy Command** (backend + frontend):
+```bash
+ssh root@157.245.13.24 "cd /opt/coinflip && git pull && cp -r frontend/* /var/www/html/ && systemctl restart coinflip"
+```
 
 ---
 
