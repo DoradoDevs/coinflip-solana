@@ -146,12 +146,42 @@ def flip_coin(blockhash: str, game_id: str) -> CoinSide:
 
 ### API Endpoints
 ```
-GET  /api/wagers/open           - List open wagers
-POST /api/wager/create          - Create new wager
-POST /api/wager/{id}/verify     - Verify creator deposit
-POST /api/wager/{id}/accept     - Accept and execute flip
-GET  /api/games/recent          - Recent completed games with proof
+GET  /api/wagers/open                  - List open wagers
+POST /api/wager/create                 - Create new wager (returns escrow address)
+POST /api/wager/{id}/verify-deposit    - Verify creator deposit → status: open
+POST /api/wager/{id}/prepare-accept    - Create acceptor escrow (returns escrow address)
+POST /api/wager/{id}/accept            - Verify acceptor deposit & execute flip
+GET  /api/games/recent                 - Recent completed games with proof
+
+# Admin Endpoints
+GET  /api/admin/wagers                 - List all wagers with balances
+POST /api/admin/wager/{id}/refund      - Refund escrow to payout wallet
+POST /api/admin/wager/{id}/cancel      - Mark wager as cancelled
+POST /api/admin/wager/{id}/export-key  - Export escrow private key
 ```
+
+### Complete Wager Flow (CRITICAL - Read Carefully)
+
+**Creator Flow:**
+1. `POST /api/wager/create` - Creates wager + creator escrow wallet
+2. User deposits `amount + 0.025 fee` to creator escrow **FROM PAYOUT WALLET**
+3. `POST /api/wager/{id}/verify-deposit` - Verifies deposit, status → "open"
+
+**Acceptor Flow:**
+1. `POST /api/wager/{id}/prepare-accept` - Creates acceptor escrow, saves to wager
+2. User deposits `amount + 0.025 fee` to acceptor escrow **FROM PAYOUT WALLET**
+3. `POST /api/wager/{id}/accept` - Verifies deposit to **EXISTING** escrow, executes flip
+
+**⚠️ CRITICAL: Accept uses EXISTING escrow from prepare-accept!**
+- `prepare-accept` creates escrow, saves address to `wager.acceptor_escrow_address`
+- `accept` calls `verify_escrow_deposit()` against that EXISTING address
+- If `accept` created a new escrow, user would deposit to escrow A but verify against escrow B = FAIL
+
+### Deposit Verification Rules
+- **Sender must match**: Deposit must come from user's payout wallet
+- **Recipient must match**: Deposit must go to the escrow shown in UI
+- **Amount must match**: Exactly `wager_amount + 0.025 SOL` transaction fee
+- **Signature tracked**: Each TX signature can only be used once (prevents double-spend)
 
 ---
 
@@ -474,9 +504,64 @@ fuser -k 8000/tcp  # Then restart service
 
 ---
 
-## Recent Changes (2025-11-29)
+## Coinflip Troubleshooting
 
-### Coinflip Web App
+### Common Errors & Fixes
+
+**"Wager creator not found"**
+- **Cause**: `wager.creator_id` points to user that doesn't exist
+- **Fix**: Accept endpoint has fallback to create user via `ensure_web_user(wager.creator_wallet)`
+
+**"Sender mismatch: expected X, got Y"**
+- **Cause**: User deposited from wrong wallet (not their payout wallet)
+- **Fix**: UI shows warning "⚠️ Send from your payout wallet address!"
+- **User Action**: Must send from the same wallet entered in profile
+
+**"Recipient mismatch: expected X, got Y"**
+- **Cause**: Accept endpoint was creating NEW escrow instead of using existing one
+- **Fix**: `verify_escrow_deposit()` function verifies against EXISTING escrow from prepare-accept
+- **Files**: `backend/game/escrow.py`, `backend/api.py`
+
+**"Invalid deposit transaction" / 500 Internal Server Error**
+- **Cause**: Usually one of the above mismatches
+- **Debug**: Check server logs with `journalctl -u coinflip -f`
+
+**"422 Unprocessable Content" on accept**
+- **Cause**: Request body doesn't match expected schema
+- **Fix**: Check AcceptWagerRequest model in api.py (wager_id is in URL path, not body)
+
+### Key Files Reference
+```
+backend/
+├── api.py                    # All endpoints, request models
+├── game/
+│   ├── escrow.py             # create_escrow_wallet(), verify_escrow_deposit()
+│   ├── solana_ops.py         # verify_deposit_transaction() - checks sender/recipient
+│   └── coinflip.py           # play_pvp_game_with_escrows()
+└── database/
+    └── models.py             # Wager model (creator_id, acceptor_escrow_address, etc.)
+```
+
+### Admin Panel Functions
+- **Refund**: Transfers escrow funds to creator/acceptor payout wallet
+- **Cancel**: Marks wager as cancelled (use after refund)
+- **Export**: Shows escrow private key for manual recovery
+
+---
+
+## Recent Changes (2025-11-29 & 2025-11-30)
+
+### Coinflip Web App (2025-11-30)
+- **CRITICAL FIX**: Accept endpoint now uses EXISTING escrow from prepare-accept
+  - Added `verify_escrow_deposit()` function for verifying deposits to existing escrows
+  - Fixed "Recipient mismatch" errors caused by creating new escrow during accept
+- Admin panel buttons restored: Refund, Cancel, Export Key
+- Added "Send from payout wallet" warning on deposit screens
+- Fixed admin wagers crash (Wager model has no acceptor_wallet field)
+- Fixed AcceptWagerRequest model (wager_id in URL path, not body)
+- Creator lookup fallback for old wagers
+
+### Coinflip Web App (2025-11-29)
 - Removed all emojis from frontend (index.html, app.js)
 - Separated Telegram bot to Coinflip-Telegram folder
 - Web-only focus for coinflipvp.com
