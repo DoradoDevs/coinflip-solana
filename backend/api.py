@@ -153,9 +153,9 @@ class CreateWagerRequest(BaseModel):
 
 
 class AcceptWagerRequest(BaseModel):
-    wager_id: str
     acceptor_wallet: str
     deposit_tx_signature: Optional[str] = None  # Required for Web users
+    source: Optional[str] = None  # "web" or "telegram"
 
 
 class VerifyDepositRequest(BaseModel):
