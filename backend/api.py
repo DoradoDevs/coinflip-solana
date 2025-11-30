@@ -1102,8 +1102,8 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
         raise HTTPException(status_code=500, detail="Failed to prepare accept. Please try again.")
 
 
-@app.post("/api/wager/accept")
-async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Request) -> GameResponse:
+@app.post("/api/wager/{wager_id}/accept")
+async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http_request: Request) -> GameResponse:
     """Accept a PVP wager with isolated escrow wallets.
 
     SECURITY: Creates second escrow wallet for acceptor, executes game using both escrows.
@@ -1119,9 +1119,8 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
     try:
         user = ensure_web_user(request.acceptor_wallet)
 
-        # Get wager (initial check only)
-        wagers = db.get_open_wagers(limit=100)
-        wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
+        # Get wager using path parameter
+        wager = db.get_wager(wager_id)
 
         if not wager:
             raise HTTPException(status_code=404, detail="Wager not found")
@@ -1137,7 +1136,7 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
 
         # SECURITY: Atomically accept wager (prevents double-acceptance race condition)
         # This uses an exclusive database lock to ensure only one user can accept
-        accepted = db.atomic_accept_wager(request.wager_id, user.user_id)
+        accepted = db.atomic_accept_wager(wager_id, user.user_id)
 
         if not accepted:
             raise HTTPException(
@@ -1146,8 +1145,7 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
             )
 
         # Reload wager to get updated status
-        wagers = db.get_open_wagers(limit=100)
-        wager = next((w for w in wagers if w.wager_id == request.wager_id), None)
+        wager = db.get_wager(wager_id)
         if not wager:
             # Shouldn't happen, but handle gracefully
             raise HTTPException(status_code=500, detail="Wager disappeared after acceptance")
@@ -1218,12 +1216,12 @@ async def accept_wager_endpoint(request: AcceptWagerRequest, http_request: Reque
         db.save_user(creator)
         db.save_user(user)
 
-        logger.info(f"Web user {request.acceptor_wallet} accepted wager {request.wager_id}")
+        logger.info(f"Web user {request.acceptor_wallet} accepted wager {wager_id}")
 
         # Broadcast to WebSocket clients
         await manager.broadcast({
             "type": "wager_accepted",
-            "wager_id": request.wager_id,
+            "wager_id": wager_id,
             "game_id": game.game_id,
             "winner": game.winner_id
         })
