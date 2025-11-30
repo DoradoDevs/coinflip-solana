@@ -1033,6 +1033,7 @@ async def get_open_wagers() -> List[WagerResponse]:
 
         result.append(WagerResponse(
             wager_id=w.wager_id,
+            id=w.wager_id,  # Frontend uses 'id' for compatibility
             creator_wallet=w.creator_wallet,
             creator_username=creator_username,
             creator_side=w.creator_side.value,
