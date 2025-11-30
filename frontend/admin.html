@@ -789,6 +789,7 @@
 
         async function loadWagers() {
             const status = document.getElementById('wagerStatusFilter').value;
+            const tbody = document.getElementById('wagersTableBody');
 
             let url = `${API_URL}/api/admin/wagers?limit=100`;
             if (status) url += `&status=${status}`;
@@ -801,9 +802,12 @@
 
                 if (data.success) {
                     renderWagers(data.wagers);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Error: ${data.detail || 'Failed to load wagers'}</td></tr>`;
                 }
             } catch (err) {
                 console.error('Failed to load wagers:', err);
+                tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Error loading wagers: ${err.message}</td></tr>`;
             }
         }
 
