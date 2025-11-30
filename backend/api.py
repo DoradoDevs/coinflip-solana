@@ -1129,10 +1129,12 @@ async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http
         if wager.creator_wallet == request.acceptor_wallet:
             raise HTTPException(status_code=400, detail="Cannot accept your own wager")
 
-        # Get creator
+        # Get creator - try by ID first, then by wallet if that fails
         creator = db.get_user(wager.creator_id)
         if not creator:
-            raise HTTPException(status_code=404, detail="Wager creator not found")
+            # Fallback: ensure creator exists via wallet (handles old wagers)
+            creator = ensure_web_user(wager.creator_wallet)
+            logger.info(f"[WAGER] Creator not found by ID, created/found via wallet: {wager.creator_wallet}")
 
         # SECURITY: Atomically accept wager (prevents double-acceptance race condition)
         # This uses an exclusive database lock to ensure only one user can accept
