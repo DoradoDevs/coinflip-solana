@@ -38,17 +38,32 @@ def generate_wallet() -> Tuple[str, str]:
 
 
 async def get_sol_balance(rpc_url: str, wallet_address: str) -> float:
-    """Get SOL balance for a wallet."""
-    try:
-        async with AsyncClient(rpc_url) as client:
-            pubkey = Pubkey.from_string(wallet_address)
-            resp = await client.get_balance(pubkey, Confirmed)
-            if resp.value is not None:
-                return resp.value / LAMPORTS_PER_SOL
-            return 0.0
-    except Exception as e:
-        logger.error(f"Error getting balance for {wallet_address}: {e}")
-        return 0.0
+    """Get SOL balance for a wallet.
+
+    IMPORTANT: Raises exception on RPC failure (don't silently return 0).
+    """
+    max_retries = 3
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            async with AsyncClient(rpc_url) as client:
+                pubkey = Pubkey.from_string(wallet_address)
+                resp = await client.get_balance(pubkey, Confirmed)
+                if resp.value is not None:
+                    balance = resp.value / LAMPORTS_PER_SOL
+                    logger.info(f"[BALANCE] {wallet_address}: {balance} SOL")
+                    return balance
+                return 0.0
+        except Exception as e:
+            last_error = e
+            logger.warning(f"[BALANCE] Attempt {attempt + 1}/{max_retries} failed for {wallet_address}: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1)  # Wait before retry
+
+    # All retries failed - raise the error (don't return 0.0!)
+    logger.error(f"[BALANCE] All retries failed for {wallet_address}: {last_error}")
+    raise Exception(f"Failed to get balance for {wallet_address}: {last_error}")
 
 
 async def transfer_sol(
@@ -60,46 +75,59 @@ async def transfer_sol(
     """Transfer SOL from one wallet to another.
 
     Returns:
-        Transaction signature if successful, None otherwise.
+        Transaction signature if successful, raises Exception on failure.
     """
     if amount_sol <= 0:
-        return None
+        raise Exception(f"Invalid amount: {amount_sol}")
 
-    try:
-        async with AsyncClient(rpc_url) as client:
-            kp = keypair_from_base58(from_secret)
-            to_pubkey = Pubkey.from_string(to_address)
-            lamports = math.floor(amount_sol * LAMPORTS_PER_SOL)
+    max_retries = 3
+    last_error = None
 
-            # Get fresh blockhash
-            blockhash_resp = await client.get_latest_blockhash(Confirmed)
-            recent_blockhash = blockhash_resp.value.blockhash
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"[TRANSFER] Attempt {attempt + 1}: {amount_sol} SOL to {to_address}")
 
-            # Create transfer instruction
-            transfer_ix = transfer(
-                TransferParams(
-                    from_pubkey=kp.pubkey(),
-                    to_pubkey=to_pubkey,
-                    lamports=lamports,
+            async with AsyncClient(rpc_url) as client:
+                kp = keypair_from_base58(from_secret)
+                to_pubkey = Pubkey.from_string(to_address)
+                lamports = math.floor(amount_sol * LAMPORTS_PER_SOL)
+
+                # Get fresh blockhash
+                blockhash_resp = await client.get_latest_blockhash(Confirmed)
+                recent_blockhash = blockhash_resp.value.blockhash
+
+                # Create transfer instruction
+                transfer_ix = transfer(
+                    TransferParams(
+                        from_pubkey=kp.pubkey(),
+                        to_pubkey=to_pubkey,
+                        lamports=lamports,
+                    )
                 )
-            )
 
-            # Build and sign transaction
-            tx = Transaction.new_signed_with_payer(
-                [transfer_ix],
-                kp.pubkey(),
-                [kp],
-                recent_blockhash
-            )
+                # Build and sign transaction
+                tx = Transaction.new_signed_with_payer(
+                    [transfer_ix],
+                    kp.pubkey(),
+                    [kp],
+                    recent_blockhash
+                )
 
-            # Send transaction (skip preflight to avoid stale blockhash)
-            opts = TxOpts(skip_preflight=True)
-            resp = await client.send_raw_transaction(bytes(tx), opts)
-            return str(resp.value)
+                # Send transaction (skip preflight to avoid stale blockhash)
+                opts = TxOpts(skip_preflight=True)
+                resp = await client.send_raw_transaction(bytes(tx), opts)
+                tx_sig = str(resp.value)
+                logger.info(f"[TRANSFER] Success! TX: {tx_sig}")
+                return tx_sig
 
-    except Exception as e:
-        logger.error(f"Transfer failed: {e}")
-        raise Exception(f"Transfer failed: {e}")
+        except Exception as e:
+            last_error = e
+            logger.warning(f"[TRANSFER] Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1)
+
+    logger.error(f"[TRANSFER] All retries failed: {last_error}")
+    raise Exception(f"Transfer failed after {max_retries} attempts: {last_error}")
 
 
 async def get_latest_blockhash(rpc_url: str) -> str:
