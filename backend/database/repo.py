@@ -600,6 +600,31 @@ class Database:
             return self._row_to_wager(row)
         return None
 
+    def get_all_wagers(self, status: Optional[str] = None, limit: int = 100) -> List[Wager]:
+        """Get all wagers, optionally filtered by status (admin use)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        if status:
+            cursor.execute("""
+                SELECT * FROM wagers
+                WHERE status = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (status, limit))
+        else:
+            cursor.execute("""
+                SELECT * FROM wagers
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (limit,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_wager(row) for row in rows]
+
     def get_user_wagers(self, user_id: int) -> List[Wager]:
         """Get user's wagers."""
         conn = sqlite3.connect(self.db_path)

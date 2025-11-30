@@ -1634,6 +1634,116 @@ async def admin_toggle_admin(user_id: int, http_request: Request):
     }
 
 
+# === ADMIN WAGER MANAGEMENT ===
+
+@app.get("/api/admin/wagers")
+async def admin_list_wagers(http_request: Request, status: Optional[str] = None, limit: int = 50):
+    """List all wagers with escrow info (admin only)."""
+    require_admin(http_request)
+
+    wagers = db.get_all_wagers(status=status, limit=min(limit, 100))
+
+    result = []
+    for w in wagers:
+        wager_data = {
+            "wager_id": w.wager_id,
+            "creator_wallet": w.creator_wallet,
+            "creator_side": w.creator_side.value if w.creator_side else None,
+            "amount": w.amount,
+            "status": w.status,
+            "escrow_address": w.creator_escrow_address,
+            "created_at": w.created_at.isoformat() if w.created_at else None,
+            "acceptor_wallet": w.acceptor_wallet,
+        }
+
+        # Check escrow balance for pending wagers
+        if w.status == "pending_deposit" and w.creator_escrow_address:
+            try:
+                balance = await get_sol_balance(RPC_URL, w.creator_escrow_address)
+                wager_data["escrow_balance"] = balance
+            except:
+                wager_data["escrow_balance"] = None
+
+        result.append(wager_data)
+
+    return {
+        "success": True,
+        "count": len(result),
+        "wagers": result
+    }
+
+
+@app.post("/api/admin/wager/{wager_id}/refund")
+async def admin_refund_wager(wager_id: str, http_request: Request):
+    """Refund a pending wager to the creator (admin only)."""
+    admin = require_admin(http_request)
+
+    from utils import decrypt_secret
+
+    # Get wager
+    wager = db.get_wager(wager_id)
+    if not wager:
+        raise HTTPException(status_code=404, detail="Wager not found")
+
+    if wager.status not in ["pending_deposit", "open"]:
+        raise HTTPException(status_code=400, detail=f"Cannot refund wager with status: {wager.status}")
+
+    if not wager.creator_escrow_address or not wager.creator_escrow_secret:
+        raise HTTPException(status_code=400, detail="Wager has no escrow wallet")
+
+    # Check escrow balance
+    try:
+        balance = await get_sol_balance(RPC_URL, wager.creator_escrow_address)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check escrow balance: {e}")
+
+    if balance < 0.001:
+        # Just mark as refunded if no balance
+        wager.status = "refunded"
+        db.save_wager(wager)
+        return {
+            "success": True,
+            "message": "No balance in escrow. Wager marked as refunded.",
+            "wager_id": wager_id,
+            "refunded_amount": 0
+        }
+
+    # Decrypt escrow secret
+    try:
+        escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to decrypt escrow: {e}")
+
+    # Calculate refund (leave tiny amount for tx fee)
+    refund_amount = balance - 0.000005
+
+    # Execute refund
+    try:
+        tx_sig = await transfer_sol(
+            RPC_URL,
+            escrow_secret,
+            wager.creator_wallet,
+            refund_amount
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Refund transfer failed: {e}")
+
+    # Update wager status
+    wager.status = "refunded"
+    db.save_wager(wager)
+
+    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {refund_amount} SOL to {wager.creator_wallet}")
+
+    return {
+        "success": True,
+        "message": f"Refunded {refund_amount:.6f} SOL to {wager.creator_wallet}",
+        "wager_id": wager_id,
+        "refunded_amount": refund_amount,
+        "tx_signature": tx_sig,
+        "solscan_url": f"https://solscan.io/tx/{tx_sig}"
+    }
+
+
 # === WEBSOCKET FOR LIVE UPDATES ===
 
 class ConnectionManager:

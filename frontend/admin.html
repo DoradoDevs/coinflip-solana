@@ -417,6 +417,7 @@
         <div class="admin-tabs">
             <button class="admin-tab active" onclick="showPanel('tickets')">Support Tickets</button>
             <button class="admin-tab" onclick="showPanel('users')">Users</button>
+            <button class="admin-tab" onclick="showPanel('wagers')">Wagers</button>
         </div>
 
         <!-- Tickets Panel -->
@@ -475,6 +476,39 @@
                 </thead>
                 <tbody id="usersTableBody">
                     <tr><td colspan="8" class="empty-state">Loading users...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Wagers Panel -->
+        <div id="wagersPanel" class="admin-panel">
+            <div class="filter-bar">
+                <select id="wagerStatusFilter" onchange="loadWagers()">
+                    <option value="">All Statuses</option>
+                    <option value="pending_deposit">Pending Deposit</option>
+                    <option value="open">Open</option>
+                    <option value="completed">Completed</option>
+                    <option value="refunded">Refunded</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <button class="action-btn primary" onclick="loadWagers()">Refresh</button>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Wager ID</th>
+                        <th>Creator</th>
+                        <th>Amount</th>
+                        <th>Side</th>
+                        <th>Status</th>
+                        <th>Escrow</th>
+                        <th>Balance</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="wagersTableBody">
+                    <tr><td colspan="9" class="empty-state">Loading wagers...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -640,6 +674,7 @@
             // Load data
             if (panel === 'tickets') loadTickets();
             else if (panel === 'users') loadUsers();
+            else if (panel === 'wagers') loadWagers();
         }
 
         async function loadTickets() {
@@ -748,6 +783,92 @@
                     </td>
                 </tr>
             `).join('');
+        }
+
+        // === WAGERS MANAGEMENT ===
+
+        async function loadWagers() {
+            const status = document.getElementById('wagerStatusFilter').value;
+
+            let url = `${API_URL}/api/admin/wagers?limit=100`;
+            if (status) url += `&status=${status}`;
+
+            try {
+                const res = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    renderWagers(data.wagers);
+                }
+            } catch (err) {
+                console.error('Failed to load wagers:', err);
+            }
+        }
+
+        function renderWagers(wagers) {
+            const tbody = document.getElementById('wagersTableBody');
+
+            if (!wagers.length) {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No wagers found</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = wagers.map(w => {
+                const creatorShort = w.creator_wallet ?
+                    `${w.creator_wallet.slice(0, 4)}...${w.creator_wallet.slice(-4)}` : '-';
+                const escrowShort = w.escrow_address ?
+                    `${w.escrow_address.slice(0, 4)}...${w.escrow_address.slice(-4)}` : '-';
+                const balance = w.escrow_balance !== undefined ?
+                    `${w.escrow_balance.toFixed(4)} SOL` : '-';
+                const canRefund = (w.status === 'pending_deposit' || w.status === 'open') &&
+                                  w.escrow_balance && w.escrow_balance > 0.001;
+
+                return `
+                    <tr>
+                        <td><code style="font-size: 0.75rem;">${w.wager_id}</code></td>
+                        <td title="${w.creator_wallet}">${creatorShort}</td>
+                        <td>${w.amount} SOL</td>
+                        <td>${w.creator_side || '-'}</td>
+                        <td><span class="badge badge-${w.status}">${w.status}</span></td>
+                        <td>
+                            <a href="https://solscan.io/account/${w.escrow_address}" target="_blank" title="${w.escrow_address}">
+                                ${escrowShort}
+                            </a>
+                        </td>
+                        <td>${balance}</td>
+                        <td>${formatDate(w.created_at)}</td>
+                        <td>
+                            ${canRefund ? `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>` : '-'}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function refundWager(wagerId) {
+            if (!confirm(`Refund wager ${wagerId}? This will send the escrow balance back to the creator.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/refund`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(`Refund successful!\n\nAmount: ${data.refunded_amount.toFixed(6)} SOL\nTX: ${data.tx_signature}\n\nView on Solscan: ${data.solscan_url}`);
+                    loadWagers();
+                } else {
+                    throw new Error(data.detail || 'Refund failed');
+                }
+            } catch (err) {
+                console.error('Failed to refund wager:', err);
+                alert('Error: ' + (err.message || 'Failed to refund wager'));
+            }
         }
 
         function openResetPasswordModal(userId, email) {
