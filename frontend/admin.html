@@ -840,12 +840,18 @@
                 const acceptorHasFunds = hasAcceptorBalance && w.acceptor_escrow_balance > 0.001;
 
                 // Build action buttons
+                const hasFunds = creatorHasFunds || acceptorHasFunds;
+                const canCancel = w.status !== 'cancelled' && w.status !== 'completed';
+
                 let actions = [];
-                if (creatorHasFunds) {
-                    actions.push(`<button class="action-btn danger" onclick="recoverEscrow('${w.wager_id}', 'creator')" title="Recover creator escrow">Creator</button>`);
+                if (hasFunds) {
+                    actions.push(`<button class="action-btn warning" onclick="refundWager('${w.wager_id}')" title="Refund to payout wallets">Refund</button>`);
                 }
-                if (acceptorHasFunds) {
-                    actions.push(`<button class="action-btn danger" onclick="recoverEscrow('${w.wager_id}', 'acceptor')" title="Recover acceptor escrow">Acceptor</button>`);
+                if (canCancel) {
+                    actions.push(`<button class="action-btn secondary" onclick="cancelWager('${w.wager_id}')" title="Mark as cancelled">Cancel</button>`);
+                }
+                if (w.escrow_address) {
+                    actions.push(`<button class="action-btn" onclick="exportEscrowKey('${w.wager_id}')" title="Export escrow private key">Export</button>`);
                 }
                 const actionBtn = actions.length > 0 ? actions.join(' ') : '-';
 
@@ -938,6 +944,61 @@
             } catch (err) {
                 console.error('Failed to recover escrow:', err);
                 alert('Error: ' + (err.message || 'Failed to recover escrow'));
+            }
+        }
+
+        async function cancelWager(wagerId) {
+            if (!confirm(`Cancel wager ${wagerId}?\n\nThis will mark the wager as cancelled.\nUse Refund first if there are funds to return.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/cancel`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(`Wager ${wagerId} has been cancelled.`);
+                    loadWagers();
+                } else {
+                    throw new Error(data.detail || 'Cancel failed');
+                }
+            } catch (err) {
+                console.error('Failed to cancel wager:', err);
+                alert('Error: ' + (err.message || 'Failed to cancel wager'));
+            }
+        }
+
+        async function exportEscrowKey(wagerId) {
+            if (!confirm(`Export escrow private key for ${wagerId}?\n\nWARNING: This will display the private key.\nOnly use this for manual fund recovery.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/wager/${wagerId}/export-key`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    const keyInfo = `Escrow Keys for ${wagerId}\n\n` +
+                        `Creator Escrow:\n` +
+                        `Address: ${data.creator_escrow_address || 'N/A'}\n` +
+                        `Private Key: ${data.creator_escrow_key || 'N/A'}\n\n` +
+                        `Acceptor Escrow:\n` +
+                        `Address: ${data.acceptor_escrow_address || 'N/A'}\n` +
+                        `Private Key: ${data.acceptor_escrow_key || 'N/A'}`;
+
+                    prompt('Copy the escrow key(s):', keyInfo);
+                } else {
+                    throw new Error(data.detail || 'Export failed');
+                }
+            } catch (err) {
+                console.error('Failed to export escrow key:', err);
+                alert('Error: ' + (err.message || 'Failed to export escrow key'));
             }
         }
 

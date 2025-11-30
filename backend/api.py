@@ -1845,7 +1845,7 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
 
 @app.post("/api/admin/wager/{wager_id}/cancel")
 async def admin_cancel_wager(wager_id: str, http_request: Request):
-    """Cancel a pending wager without transferring funds (admin only)."""
+    """Cancel any wager (admin only). Use refund first to return funds."""
     admin = require_admin(http_request)
 
     # Get wager
@@ -1853,8 +1853,7 @@ async def admin_cancel_wager(wager_id: str, http_request: Request):
     if not wager:
         raise HTTPException(status_code=404, detail="Wager not found")
 
-    if wager.status not in ["pending_deposit", "open"]:
-        raise HTTPException(status_code=400, detail=f"Cannot cancel wager with status: {wager.status}")
+    # Admin can cancel any wager - no status restriction
 
     # Update wager status
     wager.status = "cancelled"
@@ -1867,6 +1866,47 @@ async def admin_cancel_wager(wager_id: str, http_request: Request):
         "message": f"Wager {wager_id} cancelled",
         "wager_id": wager_id
     }
+
+
+@app.post("/api/admin/wager/{wager_id}/export-key")
+async def admin_export_escrow_key(wager_id: str, http_request: Request):
+    """Export escrow private keys for manual recovery (admin only)."""
+    admin = require_admin(http_request)
+
+    from utils import decrypt_secret
+
+    wager = db.get_wager(wager_id)
+    if not wager:
+        raise HTTPException(status_code=404, detail="Wager not found")
+
+    result = {
+        "success": True,
+        "wager_id": wager_id,
+        "creator_escrow_address": wager.creator_escrow_address,
+        "creator_escrow_key": None,
+        "acceptor_escrow_address": wager.acceptor_escrow_address,
+        "acceptor_escrow_key": None,
+    }
+
+    # Decrypt creator escrow key
+    if wager.creator_escrow_secret:
+        try:
+            result["creator_escrow_key"] = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
+        except Exception as e:
+            logger.error(f"Failed to decrypt creator escrow key: {e}")
+            result["creator_escrow_key"] = f"DECRYPT_ERROR: {str(e)}"
+
+    # Decrypt acceptor escrow key
+    if wager.acceptor_escrow_secret:
+        try:
+            result["acceptor_escrow_key"] = decrypt_secret(wager.acceptor_escrow_secret, ENCRYPTION_KEY)
+        except Exception as e:
+            logger.error(f"Failed to decrypt acceptor escrow key: {e}")
+            result["acceptor_escrow_key"] = f"DECRYPT_ERROR: {str(e)}"
+
+    logger.warning(f"Admin {admin.email} exported escrow keys for wager {wager_id}")
+
+    return result
 
 
 class AdminRecoverRequest(BaseModel):
