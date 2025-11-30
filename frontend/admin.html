@@ -482,7 +482,7 @@
 
         <!-- Wagers Panel -->
         <div id="wagersPanel" class="admin-panel">
-            <div class="filter-bar">
+            <div class="filter-bar" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                 <select id="wagerStatusFilter" onchange="loadWagers()">
                     <option value="">All Statuses</option>
                     <option value="pending_deposit">Pending Deposit</option>
@@ -492,6 +492,10 @@
                     <option value="cancelled">Cancelled</option>
                 </select>
                 <button class="action-btn primary" onclick="loadWagers()">Refresh</button>
+                <div style="margin-left: auto; display: flex; gap: 10px;">
+                    <button id="maintenanceBtn" class="action-btn secondary" onclick="toggleMaintenance()">Loading...</button>
+                    <button class="action-btn warning" onclick="sweepAllEscrows()" style="background: #f0ad4e; color: #000;">Sweep All Escrows</button>
+                </div>
             </div>
             <table class="data-table">
                 <thead>
@@ -808,6 +812,86 @@
             } catch (err) {
                 console.error('Failed to load wagers:', err);
                 tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Error loading wagers: ${err.message}</td></tr>`;
+            }
+
+            // Also check maintenance status when loading wagers
+            checkMaintenanceStatus();
+        }
+
+        async function checkMaintenanceStatus() {
+            try {
+                const res = await fetch(`${API_URL}/api/admin/maintenance`, {
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+                const btn = document.getElementById('maintenanceBtn');
+                if (data.maintenance_mode) {
+                    btn.textContent = 'Enable Betting';
+                    btn.style.background = '#28a745';
+                    btn.style.color = '#fff';
+                } else {
+                    btn.textContent = 'Disable Betting';
+                    btn.style.background = '#dc3545';
+                    btn.style.color = '#fff';
+                }
+            } catch (err) {
+                console.error('Failed to check maintenance status:', err);
+            }
+        }
+
+        async function toggleMaintenance() {
+            if (!confirm('Are you sure you want to toggle betting status?')) return;
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/maintenance/toggle`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    alert(data.message);
+                    checkMaintenanceStatus();
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to toggle maintenance'));
+                }
+            } catch (err) {
+                console.error('Failed to toggle maintenance:', err);
+                alert('Error: ' + err.message);
+            }
+        }
+
+        async function sweepAllEscrows() {
+            if (!confirm('This will sweep ALL remaining funds from ALL escrow wallets to treasury. Are you sure?')) return;
+            if (!confirm('FINAL WARNING: This action cannot be undone. Proceed?')) return;
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Sweeping...';
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/sweep-escrows`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    let msg = `Swept ${data.swept_count} escrows for ${data.total_swept.toFixed(6)} SOL`;
+                    if (data.errors && data.errors.length > 0) {
+                        msg += `\n\nErrors (${data.errors.length}):\n` + data.errors.join('\n');
+                    }
+                    alert(msg);
+                    loadWagers(); // Refresh to show updated balances
+                } else {
+                    alert('Error: ' + (data.detail || 'Failed to sweep escrows'));
+                }
+            } catch (err) {
+                console.error('Failed to sweep escrows:', err);
+                alert('Error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sweep All Escrows';
             }
         }
 

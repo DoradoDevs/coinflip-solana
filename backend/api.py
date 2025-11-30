@@ -2037,6 +2037,132 @@ async def admin_recover_escrow(wager_id: str, request: AdminRecoverRequest, http
     }
 
 
+@app.get("/api/admin/maintenance")
+async def get_maintenance_status(http_request: Request):
+    """Check if maintenance mode (betting disabled) is active."""
+    admin = require_admin(http_request)
+    return {
+        "maintenance_mode": is_emergency_stop_enabled(),
+        "message": "Betting is DISABLED" if is_emergency_stop_enabled() else "Betting is ENABLED"
+    }
+
+
+@app.post("/api/admin/maintenance/toggle")
+async def toggle_maintenance_mode(http_request: Request):
+    """Toggle maintenance mode - disables/enables all betting."""
+    admin = require_admin(http_request)
+
+    if is_emergency_stop_enabled():
+        # Remove the flag to enable betting
+        try:
+            os.remove("EMERGENCY_STOP")
+            logger.info(f"Admin {admin.email} DISABLED maintenance mode - betting is now ENABLED")
+            return {
+                "success": True,
+                "maintenance_mode": False,
+                "message": "Maintenance mode DISABLED - betting is now ENABLED"
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to disable maintenance mode: {e}")
+    else:
+        # Create the flag to disable betting
+        try:
+            with open("EMERGENCY_STOP", "w") as f:
+                f.write(f"Enabled by {admin.email} at {datetime.utcnow().isoformat()}")
+            logger.info(f"Admin {admin.email} ENABLED maintenance mode - betting is now DISABLED")
+            return {
+                "success": True,
+                "maintenance_mode": True,
+                "message": "Maintenance mode ENABLED - betting is now DISABLED"
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to enable maintenance mode: {e}")
+
+
+@app.post("/api/admin/sweep-escrows")
+async def sweep_all_escrows(http_request: Request):
+    """Sweep all remaining funds from escrow wallets to treasury.
+
+    This collects any leftover SOL from completed/cancelled wagers.
+    """
+    admin = require_admin(http_request)
+
+    from utils import decrypt_secret
+
+    # Get all wagers (we'll check each escrow)
+    wagers = db.get_all_wagers()
+
+    swept_count = 0
+    total_swept = 0.0
+    results = []
+    errors = []
+
+    for wager in wagers:
+        # Check creator escrow
+        if wager.creator_escrow_address and wager.creator_escrow_secret:
+            try:
+                balance = await get_sol_balance(RPC_URL, wager.creator_escrow_address)
+                if balance > 0.001:  # Only sweep if meaningful balance
+                    escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
+                    sweep_amount = balance - 0.000005  # Leave dust for rent
+
+                    tx_sig = await transfer_sol(
+                        RPC_URL,
+                        escrow_secret,
+                        TREASURY_WALLET,
+                        sweep_amount
+                    )
+                    swept_count += 1
+                    total_swept += sweep_amount
+                    results.append({
+                        "wager_id": wager.id,
+                        "escrow_type": "creator",
+                        "amount": sweep_amount,
+                        "tx": tx_sig
+                    })
+                    logger.info(f"[SWEEP] Creator escrow {wager.creator_escrow_address}: {sweep_amount} SOL -> treasury")
+            except Exception as e:
+                errors.append(f"Creator escrow {wager.id}: {str(e)}")
+
+        # Check acceptor escrow
+        if wager.acceptor_escrow_address and wager.acceptor_escrow_secret:
+            try:
+                balance = await get_sol_balance(RPC_URL, wager.acceptor_escrow_address)
+                if balance > 0.001:  # Only sweep if meaningful balance
+                    escrow_secret = decrypt_secret(wager.acceptor_escrow_secret, ENCRYPTION_KEY)
+                    sweep_amount = balance - 0.000005  # Leave dust for rent
+
+                    tx_sig = await transfer_sol(
+                        RPC_URL,
+                        escrow_secret,
+                        TREASURY_WALLET,
+                        sweep_amount
+                    )
+                    swept_count += 1
+                    total_swept += sweep_amount
+                    results.append({
+                        "wager_id": wager.id,
+                        "escrow_type": "acceptor",
+                        "amount": sweep_amount,
+                        "tx": tx_sig
+                    })
+                    logger.info(f"[SWEEP] Acceptor escrow {wager.acceptor_escrow_address}: {sweep_amount} SOL -> treasury")
+            except Exception as e:
+                errors.append(f"Acceptor escrow {wager.id}: {str(e)}")
+
+    logger.info(f"Admin {admin.email} swept {swept_count} escrows for {total_swept:.6f} SOL total")
+
+    return {
+        "success": True,
+        "message": f"Swept {swept_count} escrows for {total_swept:.6f} SOL",
+        "swept_count": swept_count,
+        "total_swept": total_swept,
+        "treasury_wallet": TREASURY_WALLET,
+        "results": results,
+        "errors": errors if errors else None
+    }
+
+
 # === WEBSOCKET FOR LIVE UPDATES ===
 
 class ConnectionManager:
