@@ -824,14 +824,14 @@
                     `${w.creator_wallet.slice(0, 4)}...${w.creator_wallet.slice(-4)}` : '-';
                 const escrowShort = w.escrow_address ?
                     `${w.escrow_address.slice(0, 4)}...${w.escrow_address.slice(-4)}` : '-';
-                const balance = w.escrow_balance !== undefined && w.escrow_balance !== null ?
-                    `${w.escrow_balance.toFixed(4)} SOL` : 'checking...';
-                const isPendingOrOpen = w.status === 'pending_deposit' || w.status === 'open';
+                const hasBalance = w.escrow_balance !== undefined && w.escrow_balance !== null;
+                const balance = hasBalance ? `${w.escrow_balance.toFixed(4)} SOL` : '-';
+                const hasFunds = hasBalance && w.escrow_balance > 0.001;
 
-                // Show Refund button for all pending/open wagers - backend handles both cases
+                // Show Recover button for ANY wager with funds - admin can always recover
                 let actionBtn = '-';
-                if (isPendingOrOpen) {
-                    actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Refund</button>`;
+                if (hasFunds) {
+                    actionBtn = `<button class="action-btn danger" onclick="refundWager('${w.wager_id}')">Recover</button>`;
                 }
 
                 return `
@@ -855,7 +855,7 @@
         }
 
         async function refundWager(wagerId) {
-            if (!confirm(`Refund wager ${wagerId}?\n\nThis will:\n- Check escrow balance\n- Return any funds to creator's payout wallet\n- Mark wager as refunded`)) {
+            if (!confirm(`Recover funds from ${wagerId}?\n\nThis will:\n- Check escrow balance\n- Transfer all funds to creator's payout wallet\n- Mark wager as refunded`)) {
                 return;
             }
 

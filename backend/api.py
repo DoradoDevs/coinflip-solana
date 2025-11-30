@@ -269,6 +269,7 @@ class GameResponse(BaseModel):
 class WagerResponse(BaseModel):
     wager_id: str
     creator_wallet: str
+    creator_username: Optional[str] = None  # Display name for the creator
     creator_side: str
     amount: float
     status: str
@@ -1024,17 +1025,23 @@ async def get_open_wagers() -> List[WagerResponse]:
     """Get all open wagers."""
     wagers = db.get_open_wagers(limit=20)
 
-    return [
-        WagerResponse(
+    result = []
+    for w in wagers:
+        # Get creator's username for display
+        creator = db.get_user(w.creator_id)
+        creator_username = creator.username if creator and creator.username else None
+
+        result.append(WagerResponse(
             wager_id=w.wager_id,
             creator_wallet=w.creator_wallet,
+            creator_username=creator_username,
             creator_side=w.creator_side.value,
             amount=w.amount,
             status=w.status,
             created_at=w.created_at.isoformat()
-        )
-        for w in wagers
-    ]
+        ))
+
+    return result
 
 
 @app.post("/api/wager/accept")
@@ -1656,8 +1663,8 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
             "acceptor_id": w.acceptor_id,
         }
 
-        # Check escrow balance for pending/open wagers (any wager with an escrow)
-        if w.status in ["pending_deposit", "open"] and w.creator_escrow_address:
+        # Check escrow balance for ANY wager with an escrow (for recovery purposes)
+        if w.creator_escrow_address:
             try:
                 balance = await get_sol_balance(RPC_URL, w.creator_escrow_address)
                 wager_data["escrow_balance"] = balance
@@ -1677,7 +1684,10 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
 
 @app.post("/api/admin/wager/{wager_id}/refund")
 async def admin_refund_wager(wager_id: str, http_request: Request):
-    """Refund a pending wager to the creator's payout wallet (admin only)."""
+    """Recover funds from any wager's escrow to the creator's payout wallet (admin only).
+
+    This works for ANY wager status - admin can always recover stuck funds.
+    """
     admin = require_admin(http_request)
 
     from utils import decrypt_secret
@@ -1687,8 +1697,8 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
     if not wager:
         raise HTTPException(status_code=404, detail="Wager not found")
 
-    if wager.status not in ["pending_deposit", "open"]:
-        raise HTTPException(status_code=400, detail=f"Cannot refund wager with status: {wager.status}")
+    # Admin can recover from ANY status - no status restriction
+    # This ensures funds are never stuck
 
     if not wager.creator_escrow_address or not wager.creator_escrow_secret:
         raise HTTPException(status_code=400, detail="Wager has no escrow wallet")

@@ -479,13 +479,16 @@ async function loadActiveWagers() {
 
         container.innerHTML = wagers.map(wager => {
             const opponentSide = wager.creator_side === 'heads' ? 'tails' : 'heads';
+            // Show username if available, otherwise show shortened wallet
+            const creatorDisplay = wager.creator_username ||
+                `${wager.creator_wallet.slice(0, 4)}...${wager.creator_wallet.slice(-4)}`;
 
             return `
                 <div class="wager-card" data-wager-id="${wager.id}">
                     <div class="wager-info">
                         <span class="wager-amount">${wager.amount} SOL</span>
                         <span class="wager-side">${wager.creator_side.toUpperCase()}</span>
-                        <span class="wager-creator">${wager.creator_wallet.slice(0, 4)}...${wager.creator_wallet.slice(-4)}</span>
+                        <span class="wager-creator">${creatorDisplay}</span>
                     </div>
                     <button class="btn btn-primary btn-accept" onclick="openAcceptModal('${wager.id}', ${wager.amount}, '${wager.creator_side}')">
                         Accept (${opponentSide.toUpperCase()})
@@ -522,7 +525,8 @@ function openCreateModal() {
     document.querySelectorAll('.side-btn').forEach(btn => btn.classList.remove('selected'));
     document.querySelectorAll('.amount-btn').forEach(btn => btn.classList.remove('selected'));
     document.getElementById('customAmount').value = '';
-    document.getElementById('creatorWallet').value = '';
+    // Auto-fill payout wallet if user has one set
+    document.getElementById('creatorWallet').value = currentUser?.payout_wallet || '';
     document.getElementById('wagerSummary').style.display = 'none';
     document.getElementById('continueBtn').disabled = true;
     document.getElementById('depositTxSignature').value = '';
