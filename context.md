@@ -551,7 +551,25 @@ backend/
 
 ## Recent Changes (2025-11-29 & 2025-11-30)
 
-### Coinflip Web App (2025-11-30)
+### Coinflip Web App (2025-11-30) - Session 2
+- **Username Display Fixes**:
+  - Added `get_user_by_wallet()` to database for username fallback lookup
+  - Open wagers now show usernames (with wallet fallback if no username)
+  - Recent games show `winner_username` field (with wallet fallback)
+- **Solscan Link Fix**: "View on Solscan" now uses actual `payout_tx` signature instead of `proof.blockhash`
+  - Fixed `showProofModal()` to receive `payoutTx` parameter
+- **Admin Maintenance Mode**:
+  - `GET/POST /api/admin/maintenance` - Check/toggle maintenance status
+  - Uses `EMERGENCY_STOP` file to disable all betting
+  - Button in admin.html shows current status
+- **Admin Sweep All Escrows**:
+  - `POST /api/admin/sweep-escrows` - Sweeps all escrow wallets to treasury
+  - Fixed bug: `wager.id` → `wager.wager_id` (Wager model uses wager_id)
+- **Fee Collection Delay**: Increased from 5s to 10s for better Solana RPC sync
+  - `collect_fees_from_escrow()` now waits 10 seconds before checking balance
+  - Prevents "insufficient lamports" errors from stale RPC data
+
+### Coinflip Web App (2025-11-30) - Session 1
 - **CRITICAL FIX**: Accept endpoint now uses EXISTING escrow from prepare-accept
   - Added `verify_escrow_deposit()` function for verifying deposits to existing escrows
   - Fixed "Recipient mismatch" errors caused by creating new escrow during accept

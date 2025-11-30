@@ -2115,14 +2115,14 @@ async def sweep_all_escrows(http_request: Request):
                     swept_count += 1
                     total_swept += sweep_amount
                     results.append({
-                        "wager_id": wager.id,
+                        "wager_id": wager.wager_id,
                         "escrow_type": "creator",
                         "amount": sweep_amount,
                         "tx": tx_sig
                     })
                     logger.info(f"[SWEEP] Creator escrow {wager.creator_escrow_address}: {sweep_amount} SOL -> treasury")
             except Exception as e:
-                errors.append(f"Creator escrow {wager.id}: {str(e)}")
+                errors.append(f"Creator escrow {wager.wager_id}: {str(e)}")
 
         # Check acceptor escrow
         if wager.acceptor_escrow_address and wager.acceptor_escrow_secret:
@@ -2141,14 +2141,14 @@ async def sweep_all_escrows(http_request: Request):
                     swept_count += 1
                     total_swept += sweep_amount
                     results.append({
-                        "wager_id": wager.id,
+                        "wager_id": wager.wager_id,
                         "escrow_type": "acceptor",
                         "amount": sweep_amount,
                         "tx": tx_sig
                     })
                     logger.info(f"[SWEEP] Acceptor escrow {wager.acceptor_escrow_address}: {sweep_amount} SOL -> treasury")
             except Exception as e:
-                errors.append(f"Acceptor escrow {wager.id}: {str(e)}")
+                errors.append(f"Acceptor escrow {wager.wager_id}: {str(e)}")
 
     logger.info(f"Admin {admin.email} swept {swept_count} escrows for {total_swept:.6f} SOL total")
 

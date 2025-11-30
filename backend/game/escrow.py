@@ -275,8 +275,8 @@ async def collect_fees_from_escrow(
 
     # IMPORTANT: Wait for previous transactions to be confirmed on-chain
     # This prevents stale RPC balance from causing "insufficient lamports" errors
-    # Using 5 seconds to give more time for Solana finality
-    await asyncio.sleep(5)
+    # Using 10 seconds to give more time for Solana finality
+    await asyncio.sleep(10)
 
     # Check remaining balance with retry (RPC can return stale data)
     max_retries = 3
