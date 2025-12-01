@@ -418,6 +418,7 @@
             <button class="admin-tab active" onclick="showPanel('tickets')">Support Tickets</button>
             <button class="admin-tab" onclick="showPanel('users')">Users</button>
             <button class="admin-tab" onclick="showPanel('wagers')">Wagers</button>
+            <button class="admin-tab" onclick="showPanel('revshare')">Holder Revshare</button>
         </div>
 
         <!-- Tickets Panel -->
@@ -515,6 +516,65 @@
                     <tr><td colspan="9" class="empty-state">Loading wagers...</td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <!-- Revenue Share Panel -->
+        <div id="revsharePanel" class="admin-panel">
+            <div class="revshare-controls" style="margin-bottom: 20px;">
+                <h3 style="margin-bottom: 15px; color: var(--primary);">$FLIP Holder Revenue Share Distribution</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                    Distribute creator rewards to top 100 token holders using sqrt distribution model.
+                    Larger holders get more, but not disproportionately more.
+                </p>
+                <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                    <div class="form-group" style="margin: 0;">
+                        <label style="display: block; margin-bottom: 5px; color: var(--text-secondary);">Total SOL to Distribute</label>
+                        <input type="number" id="revshareAmount" step="0.01" min="0.01" placeholder="1.5"
+                               style="padding: 10px 15px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); width: 150px;">
+                    </div>
+                    <button class="action-btn primary" onclick="previewRevshare()" id="previewRevshareBtn">Preview Distribution</button>
+                    <button class="action-btn" onclick="executeRevshare()" id="executeRevshareBtn" disabled
+                            style="background: #28a745; color: #fff; opacity: 0.5;">Execute Distribution</button>
+                </div>
+            </div>
+
+            <div id="revshareResults" style="display: none;">
+                <div class="revshare-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div class="stat-card">
+                        <h3>Total SOL</h3>
+                        <div class="value" id="revTotalSol">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Recipients</h3>
+                        <div class="value" id="revRecipients">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Largest Payout</h3>
+                        <div class="value" id="revMaxPayout">-</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Smallest Payout</h3>
+                        <div class="value" id="revMinPayout">-</div>
+                    </div>
+                </div>
+
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Wallet</th>
+                            <th>Token Balance</th>
+                            <th>Share %</th>
+                            <th>Payout (SOL)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="revshareTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="revshareStatus" style="margin-top: 20px; padding: 15px; background: var(--bg); border-radius: 8px; display: none;">
+            </div>
         </div>
     </div>
 
@@ -1249,6 +1309,156 @@
         document.getElementById('userSearch').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') searchUsers();
         });
+
+        // === REVENUE SHARE ===
+        let currentRevshareData = null;
+
+        async function previewRevshare() {
+            const amount = parseFloat(document.getElementById('revshareAmount').value);
+            if (!amount || amount <= 0) {
+                alert('Please enter a valid SOL amount');
+                return;
+            }
+
+            const btn = document.getElementById('previewRevshareBtn');
+            const executeBtn = document.getElementById('executeRevshareBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading holders...';
+            executeBtn.disabled = true;
+            executeBtn.style.opacity = '0.5';
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/revshare/preview`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({ total_sol: amount })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Failed to preview distribution');
+                }
+
+                // Store for execution
+                currentRevshareData = data;
+
+                // Show results
+                document.getElementById('revshareResults').style.display = 'block';
+                document.getElementById('revTotalSol').textContent = data.total_sol.toFixed(4);
+                document.getElementById('revRecipients').textContent = data.recipients;
+
+                // Calculate max/min
+                const payouts = data.distribution.map(d => d.payout_sol);
+                const maxPayout = Math.max(...payouts);
+                const minPayout = Math.min(...payouts);
+                document.getElementById('revMaxPayout').textContent = maxPayout.toFixed(6);
+                document.getElementById('revMinPayout').textContent = minPayout.toFixed(6);
+
+                // Render table
+                const tbody = document.getElementById('revshareTableBody');
+                tbody.innerHTML = data.distribution.map((d, i) => {
+                    const walletShort = `${d.wallet.slice(0, 6)}...${d.wallet.slice(-4)}`;
+                    return `
+                        <tr>
+                            <td>${i + 1}</td>
+                            <td><a href="https://solscan.io/account/${d.wallet}" target="_blank" title="${d.wallet}">${walletShort}</a></td>
+                            <td>${d.balance.toLocaleString()}</td>
+                            <td>${d.share_percent.toFixed(2)}%</td>
+                            <td>${d.payout_sol.toFixed(6)} SOL</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // Enable execute button
+                executeBtn.disabled = false;
+                executeBtn.style.opacity = '1';
+
+                showRevshareStatus('Preview loaded. Review the distribution and click Execute when ready.', 'info');
+
+            } catch (err) {
+                console.error('Failed to preview revshare:', err);
+                showRevshareStatus('Error: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Preview Distribution';
+            }
+        }
+
+        async function executeRevshare() {
+            if (!currentRevshareData) {
+                alert('Please preview the distribution first');
+                return;
+            }
+
+            const amount = currentRevshareData.total_sol;
+            const recipients = currentRevshareData.recipients;
+
+            if (!confirm(`Execute revenue share distribution?\n\nTotal: ${amount} SOL\nRecipients: ${recipients}\n\nThis will send SOL to all listed wallets. Make sure you have sufficient funds in your distribution wallet.`)) {
+                return;
+            }
+
+            // Double confirm
+            if (!confirm('FINAL CONFIRMATION\n\nThis action cannot be undone. Proceed with distribution?')) {
+                return;
+            }
+
+            const btn = document.getElementById('executeRevshareBtn');
+            btn.disabled = true;
+            btn.textContent = 'Distributing...';
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/revshare/execute`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({ total_sol: amount })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Distribution failed');
+                }
+
+                let msg = `Distribution completed!\n\nTotal: ${data.total_sol} SOL\nRecipients: ${data.recipients}\nTransactions: ${data.transactions?.length || 0}`;
+                if (data.transactions && data.transactions.length > 0) {
+                    msg += '\n\nTransaction signatures:\n' + data.transactions.slice(0, 5).join('\n');
+                    if (data.transactions.length > 5) {
+                        msg += `\n... and ${data.transactions.length - 5} more`;
+                    }
+                }
+
+                alert(msg);
+                showRevshareStatus(`Distribution completed! ${data.recipients} recipients received ${data.total_sol} SOL total.`, 'success');
+
+                // Reset
+                currentRevshareData = null;
+                btn.textContent = 'Execute Distribution';
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+
+            } catch (err) {
+                console.error('Failed to execute revshare:', err);
+                showRevshareStatus('Error: ' + err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Execute Distribution';
+            }
+        }
+
+        function showRevshareStatus(message, type) {
+            const statusEl = document.getElementById('revshareStatus');
+            statusEl.style.display = 'block';
+            statusEl.style.borderLeft = type === 'error' ? '4px solid #dc3545' :
+                                        type === 'success' ? '4px solid #28a745' :
+                                        '4px solid var(--primary)';
+            statusEl.innerHTML = `<strong>${type === 'error' ? 'Error' : type === 'success' ? 'Success' : 'Info'}:</strong> ${message}`;
+        }
     </script>
 </body>
 </html>

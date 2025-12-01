@@ -72,6 +72,12 @@ class User:
     referral_payout_escrow_secret: Optional[str] = None  # Encrypted secret key
     total_referral_claimed: float = 0.0  # Total SOL claimed from referral earnings
 
+    # Token Holder Benefits ($FLIP token)
+    # Checked against payout_wallet - balance cached for 5 min
+    token_balance: float = 0.0  # $FLIP token balance
+    token_tier: str = "Normie"  # Normie, Degen, Ape, Chad, Gigachad, Whale
+    token_balance_checked_at: Optional[datetime] = None  # Last balance check timestamp
+
     # Metadata
     username: Optional[str] = None
     display_name: Optional[str] = None  # Display name (can be different from username)

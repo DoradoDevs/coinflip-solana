@@ -55,6 +55,14 @@ from auth import (
     TIER_THRESHOLDS,
     TIER_REFERRAL_RATES,
 )
+from token_config import (
+    TOKEN_ENABLED,
+    get_fee_discount as get_token_fee_discount,
+    calculate_combined_discount,
+    MAX_COMBINED_DISCOUNT,
+    BASE_FEE_RATE,
+)
+from token_checker import get_holder_status
 
 # Load environment
 load_dotenv()
@@ -241,6 +249,12 @@ class ProfileResponse(BaseModel):
     pending_referral_earnings: float
     total_referral_claimed: float
     created_at: str
+    # Token holder benefits (only populated if user holds $FLIP tokens)
+    token_tier: Optional[str] = None  # Only set if balance > 0
+    token_balance: Optional[float] = None  # Only set if balance > 0
+    token_discount: Optional[float] = None  # Token tier discount %
+    combined_discount: Optional[float] = None  # Volume + Token (capped at 40%)
+    effective_fee_rate: Optional[float] = None  # After all discounts
 
 
 class UserResponse(BaseModel):
@@ -543,6 +557,39 @@ async def get_me(http_request: Request) -> ProfileResponse:
 
     tier_progress = get_tier_progress(user.total_wagered, user.tier)
 
+    # Token holder benefits (only check if enabled and user has payout wallet)
+    token_tier = None
+    token_balance = None
+    token_discount = None
+    combined_discount = None
+    effective_fee_rate = None
+
+    if TOKEN_ENABLED and user.payout_wallet:
+        try:
+            # Check token balance (uses cache if fresh)
+            holder_status = await get_holder_status(RPC_URL, user.payout_wallet)
+
+            # Update user's cached token info
+            user.token_balance = holder_status['balance']
+            user.token_tier = holder_status['tier']
+            user.token_balance_checked_at = datetime.utcnow()
+            db.save_user(user)
+
+            # Only include in response if they hold tokens
+            if holder_status['balance'] > 0:
+                token_tier = holder_status['tier']
+                token_balance = holder_status['balance']
+                token_discount = get_token_fee_discount(holder_status['tier'])
+
+                # Calculate combined discount (volume + token, capped at 40%)
+                volume_discount = 1 - (user.tier_fee_rate / BASE_FEE_RATE)
+                combined_discount = calculate_combined_discount(volume_discount, token_discount)
+                effective_fee_rate = BASE_FEE_RATE * (1 - combined_discount)
+
+        except Exception as e:
+            # Log but don't fail profile load if token check fails
+            logger.warning(f"Token balance check failed for {user.payout_wallet}: {e}")
+
     return ProfileResponse(
         user_id=user.user_id,
         email=user.email,
@@ -561,7 +608,13 @@ async def get_me(http_request: Request) -> ProfileResponse:
         total_referrals=user.total_referrals,
         pending_referral_earnings=user.pending_referral_earnings,
         total_referral_claimed=user.total_referral_claimed,
-        created_at=user.created_at.isoformat()
+        created_at=user.created_at.isoformat(),
+        # Token holder benefits (only if they hold tokens)
+        token_tier=token_tier,
+        token_balance=token_balance,
+        token_discount=token_discount,
+        combined_discount=combined_discount,
+        effective_fee_rate=effective_fee_rate
     )
 
 
@@ -2245,6 +2298,305 @@ async def sweep_all_escrows(http_request: Request):
         "treasury_wallet": TREASURY_WALLET,
         "results": results,
         "errors": errors if errors else None
+    }
+
+
+# === HOLDER REVENUE SHARE ===
+
+class RevshareRequest(BaseModel):
+    """Request to preview or execute holder revenue share."""
+    total_sol: float
+
+
+@app.post("/api/admin/revshare/preview")
+async def preview_revshare(
+    request: Request,
+    body: RevshareRequest,
+    authorization: str = None
+):
+    """
+    Preview holder revenue share distribution (dry run).
+    Fetches top holders and calculates sqrt-weighted distribution.
+    """
+    import math
+    import httpx
+    from token_config import TOKEN_MINT
+
+    # Admin check
+    session_token = request.headers.get("authorization", "").replace("Bearer ", "")
+    admin = get_admin_from_token(session_token)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    total_sol = body.total_sol
+    if total_sol <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    # Check if token is configured
+    if TOKEN_MINT == "PLACEHOLDER_CONTRACT_ADDRESS":
+        raise HTTPException(status_code=400, detail="Token not configured. Set FLIP_TOKEN_MINT in environment first.")
+
+    # Fetch top holders via Helius API
+    helius_api_key = os.getenv("HELIUS_API_KEY", "")
+    if not helius_api_key:
+        raise HTTPException(status_code=400, detail="HELIUS_API_KEY not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            url = f"https://api.helius.xyz/v0/token-accounts?api-key={helius_api_key}"
+            response = await client.post(url, json={
+                "mint": TOKEN_MINT,
+                "limit": 200,  # Fetch extra to account for exclusions
+                "displayOptions": {"showZeroBalance": False}
+            })
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"Helius API error: {response.status_code}")
+
+            data = response.json()
+            raw_holders = data.get("token_accounts", [])
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout fetching holders from Helius")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching holders: {str(e)}")
+
+    if not raw_holders:
+        raise HTTPException(status_code=404, detail="No token holders found")
+
+    # Settings
+    MIN_BALANCE = 100_000  # 100K tokens minimum
+    TOP_HOLDERS = 100
+    MIN_PAYOUT = 0.001  # Minimum SOL payout
+
+    # LP wallet to exclude (add after token launch)
+    EXCLUDED_WALLETS = [
+        # "LP_WALLET_ADDRESS",
+    ]
+
+    # Process holders
+    holders = []
+    for h in raw_holders:
+        wallet = h.get("owner") or h.get("address", "")
+        balance = float(h.get("amount") or h.get("tokenAmount", {}).get("uiAmount", 0))
+
+        if wallet in EXCLUDED_WALLETS:
+            continue
+        if balance < MIN_BALANCE:
+            continue
+
+        holders.append({
+            "wallet": wallet,
+            "balance": balance,
+            "sqrt_balance": math.sqrt(balance)
+        })
+
+    # Sort by balance and take top N
+    holders = sorted(holders, key=lambda h: h["balance"], reverse=True)[:TOP_HOLDERS]
+
+    if not holders:
+        raise HTTPException(status_code=404, detail="No eligible holders after filtering")
+
+    # Calculate sqrt distribution
+    total_sqrt = sum(h["sqrt_balance"] for h in holders)
+
+    distribution = []
+    for h in holders:
+        share_pct = (h["sqrt_balance"] / total_sqrt) * 100
+        payout = (h["sqrt_balance"] / total_sqrt) * total_sol
+
+        if payout >= MIN_PAYOUT:
+            distribution.append({
+                "wallet": h["wallet"],
+                "balance": h["balance"],
+                "share_percent": share_pct,
+                "payout_sol": payout
+            })
+
+    logger.info(f"Admin {admin.email} previewed revshare: {total_sol} SOL to {len(distribution)} holders")
+
+    return {
+        "success": True,
+        "status": "preview",
+        "total_sol": total_sol,
+        "recipients": len(distribution),
+        "distribution": distribution
+    }
+
+
+@app.post("/api/admin/revshare/execute")
+async def execute_revshare(
+    request: Request,
+    body: RevshareRequest,
+    authorization: str = None
+):
+    """
+    Execute holder revenue share distribution.
+    Sends SOL to all eligible holders from distribution wallet.
+    """
+    import math
+    import httpx
+    from solana.rpc.async_api import AsyncClient
+    from solders.pubkey import Pubkey
+    from solders.keypair import Keypair
+    from solders.system_program import transfer, TransferParams
+    from solders.transaction import Transaction
+    from solders.message import Message
+    from token_config import TOKEN_MINT
+    import asyncio
+
+    # Admin check
+    session_token = request.headers.get("authorization", "").replace("Bearer ", "")
+    admin = get_admin_from_token(session_token)
+    if not admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    total_sol = body.total_sol
+    if total_sol <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    # Check for distribution wallet
+    revshare_wallet_secret = os.getenv("REVSHARE_WALLET_SECRET", "")
+    if not revshare_wallet_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="REVSHARE_WALLET_SECRET not configured. Add the distribution wallet private key to .env"
+        )
+
+    # Check if token is configured
+    if TOKEN_MINT == "PLACEHOLDER_CONTRACT_ADDRESS":
+        raise HTTPException(status_code=400, detail="Token not configured")
+
+    # Fetch and calculate distribution (same as preview)
+    helius_api_key = os.getenv("HELIUS_API_KEY", "")
+    if not helius_api_key:
+        raise HTTPException(status_code=400, detail="HELIUS_API_KEY not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            url = f"https://api.helius.xyz/v0/token-accounts?api-key={helius_api_key}"
+            response = await client.post(url, json={
+                "mint": TOKEN_MINT,
+                "limit": 200,
+                "displayOptions": {"showZeroBalance": False}
+            })
+
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"Helius API error: {response.status_code}")
+
+            raw_holders = response.json().get("token_accounts", [])
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching holders: {str(e)}")
+
+    # Process holders (same logic as preview)
+    MIN_BALANCE = 100_000
+    TOP_HOLDERS = 100
+    MIN_PAYOUT = 0.001
+    EXCLUDED_WALLETS = []
+
+    holders = []
+    for h in raw_holders:
+        wallet = h.get("owner") or h.get("address", "")
+        balance = float(h.get("amount") or h.get("tokenAmount", {}).get("uiAmount", 0))
+
+        if wallet in EXCLUDED_WALLETS or balance < MIN_BALANCE:
+            continue
+
+        holders.append({
+            "wallet": wallet,
+            "balance": balance,
+            "sqrt_balance": math.sqrt(balance)
+        })
+
+    holders = sorted(holders, key=lambda h: h["balance"], reverse=True)[:TOP_HOLDERS]
+    total_sqrt = sum(h["sqrt_balance"] for h in holders)
+
+    recipients = []
+    for h in holders:
+        payout = (h["sqrt_balance"] / total_sqrt) * total_sol
+        if payout >= MIN_PAYOUT:
+            recipients.append((h["wallet"], payout))
+
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No eligible recipients after filtering")
+
+    # Parse sender keypair
+    try:
+        sender_keypair = Keypair.from_base58_string(revshare_wallet_secret)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Invalid distribution wallet key: {str(e)}")
+
+    # Check sender balance
+    sender_balance = await get_sol_balance(RPC_URL, str(sender_keypair.pubkey()))
+    total_needed = sum(r[1] for r in recipients) + 0.01  # Extra for TX fees
+    if sender_balance < total_needed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient funds. Need {total_needed:.4f} SOL, have {sender_balance:.4f} SOL"
+        )
+
+    # Send transactions in batches
+    signatures = []
+    errors = []
+    batch_size = 10
+
+    async with AsyncClient(RPC_URL) as client:
+        blockhash_resp = await client.get_latest_blockhash()
+        recent_blockhash = blockhash_resp.value.blockhash
+
+        for i in range(0, len(recipients), batch_size):
+            batch = recipients[i:i + batch_size]
+
+            # Create transfer instructions for batch
+            instructions = []
+            for wallet, amount in batch:
+                try:
+                    lamports = int(amount * 1_000_000_000)
+                    ix = transfer(TransferParams(
+                        from_pubkey=sender_keypair.pubkey(),
+                        to_pubkey=Pubkey.from_string(wallet),
+                        lamports=lamports
+                    ))
+                    instructions.append(ix)
+                except Exception as e:
+                    errors.append(f"Failed to create instruction for {wallet}: {str(e)}")
+
+            if not instructions:
+                continue
+
+            try:
+                msg = Message.new_with_blockhash(
+                    instructions,
+                    sender_keypair.pubkey(),
+                    recent_blockhash
+                )
+                tx = Transaction([sender_keypair], msg, recent_blockhash)
+                result = await client.send_transaction(tx)
+
+                if result.value:
+                    signatures.append(str(result.value))
+                    logger.info(f"Revshare batch {i//batch_size + 1}: {len(instructions)} transfers - {result.value}")
+                else:
+                    errors.append(f"Batch {i//batch_size + 1} failed: {result}")
+
+            except Exception as e:
+                errors.append(f"Batch {i//batch_size + 1} error: {str(e)}")
+
+            # Small delay between batches
+            await asyncio.sleep(0.5)
+
+    total_distributed = sum(r[1] for r in recipients)
+    logger.info(f"Admin {admin.email} executed revshare: {total_distributed:.4f} SOL to {len(recipients)} holders")
+
+    return {
+        "success": True,
+        "status": "completed",
+        "total_sol": total_distributed,
+        "recipients": len(recipients),
+        "transactions": signatures,
+        "errors": errors if errors else None,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 

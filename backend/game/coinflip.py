@@ -14,6 +14,12 @@ from .solana_ops import (
     collect_fee,
     get_sol_balance
 )
+from token_config import (
+    TOKEN_ENABLED,
+    get_fee_discount as get_token_fee_discount,
+    calculate_combined_discount,
+    BASE_FEE_RATE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -394,20 +400,30 @@ async def play_pvp_game_with_escrows(
             loser_escrow_address = creator_escrow_address
             game.winner_id = acceptor.user_id
 
-        # STEP 3: CALCULATE PAYOUT (TIER-BASED FEES)
-        # Use winner's tier fee rate for calculation
-        # - Winner's tier determines fee discount
+        # STEP 3: CALCULATE PAYOUT (TIER-BASED FEES + TOKEN HOLDER DISCOUNT)
+        # Use winner's combined discount (volume tier + token holdings, capped at 40%)
         # - Winner gets: (100% - fee_rate) from both escrows
         # - Treasury gets: fee_rate from both escrows + tx fees
         # - Loser gets: Nothing
+
+        # Start with volume tier fee rate
         winner_fee_rate = winner.tier_fee_rate  # e.g., 0.019 for Bronze, 0.015 for Diamond
+
+        # Apply token holder discount if enabled
+        if TOKEN_ENABLED and hasattr(winner, 'token_tier') and winner.token_tier != "Normie":
+            # Calculate combined discount (volume + token, capped at 40%)
+            volume_discount = 1 - (winner.tier_fee_rate / BASE_FEE_RATE)
+            token_discount = get_token_fee_discount(winner.token_tier)
+            combined_discount = calculate_combined_discount(volume_discount, token_discount)
+            winner_fee_rate = BASE_FEE_RATE * (1 - combined_discount)
+            logger.info(f"[ESCROW GAME] Winner {winner.tier} + {winner.token_tier} token holder (combined: {combined_discount*100:.0f}% off)")
 
         payout_per_escrow = amount * (1 - winner_fee_rate)  # (100% - fee%) from each escrow
         total_payout = payout_per_escrow * 2  # Winner gets from both escrows
         fee_per_escrow = amount * winner_fee_rate  # Fee from each escrow
         total_fees = fee_per_escrow * 2 + (TRANSACTION_FEE * 2)  # Fees + tx costs
 
-        logger.info(f"[ESCROW GAME] Winner tier: {winner.tier} (fee rate: {winner_fee_rate*100:.1f}%)")
+        logger.info(f"[ESCROW GAME] Winner tier: {winner.tier} (effective fee rate: {winner_fee_rate*100:.2f}%)")
         logger.info(f"[ESCROW GAME] Total payout to winner: {total_payout:.6f} SOL ({payout_per_escrow:.6f} from each escrow)")
         logger.info(f"[ESCROW GAME] Total fees to treasury: {total_fees:.6f} SOL ({fee_per_escrow:.6f} + {TRANSACTION_FEE} from each escrow)")
 

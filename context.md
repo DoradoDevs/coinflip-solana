@@ -172,6 +172,8 @@ POST /api/admin/wager/{id}/export-key  - Export escrow private key
 GET  /api/admin/maintenance            - Check maintenance mode status
 POST /api/admin/maintenance/toggle     - Enable/disable all betting (EMERGENCY_STOP file)
 POST /api/admin/sweep-escrows          - Sweep all escrow funds to treasury
+POST /api/admin/revshare/preview       - Preview holder revenue share distribution
+POST /api/admin/revshare/execute       - Execute holder revenue share (sends SOL)
 ```
 
 ### Complete Wager Flow (CRITICAL - Read Carefully)
@@ -756,6 +758,7 @@ backend/
 - **Export**: Shows escrow private key for manual recovery
 - **Maintenance Mode**: Toggle button to disable all betting (creates/removes EMERGENCY_STOP file)
 - **Sweep All Escrows**: Collects all leftover funds from escrow wallets to treasury
+- **Holder Revshare**: Distribute Pump.fun creator rewards to top 100 holders (sqrt distribution)
 
 ### Solana RPC Sync Issues
 **Problem**: After payout, RPC may return stale balance data causing "insufficient lamports" errors when collecting fees.

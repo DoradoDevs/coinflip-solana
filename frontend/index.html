@@ -367,11 +367,34 @@
 
                 <!-- Tier Progress -->
                 <div class="profile-section">
-                    <h3>Tier: <span id="profileTier" class="tier-value">Starter</span></h3>
+                    <h3>Volume Tier: <span id="profileTier" class="tier-value">Starter</span></h3>
                     <div class="tier-progress-bar">
                         <div id="tierProgressFill" class="tier-progress-fill" style="width: 0%"></div>
                     </div>
                     <p class="tier-progress-text" id="tierProgressText">0 SOL to Bronze</p>
+                </div>
+
+                <!-- Token Holder Benefits (hidden by default, shown if user holds tokens) -->
+                <div class="profile-section" id="tokenBenefitsSection" style="display: none;">
+                    <h3>Token Holder: <span id="profileTokenTier" class="tier-value token-tier">-</span></h3>
+                    <div class="token-info">
+                        <div class="token-stat">
+                            <span class="token-label">$FLIP Balance:</span>
+                            <span class="token-value" id="profileTokenBalance">0</span>
+                        </div>
+                        <div class="token-stat">
+                            <span class="token-label">Token Discount:</span>
+                            <span class="token-value" id="profileTokenDiscount">0%</span>
+                        </div>
+                        <div class="token-stat highlight">
+                            <span class="token-label">Combined Discount:</span>
+                            <span class="token-value" id="profileCombinedDiscount">0%</span>
+                        </div>
+                        <div class="token-stat highlight">
+                            <span class="token-label">Effective Fee:</span>
+                            <span class="token-value" id="profileEffectiveFee">2.0%</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Payout Wallet -->

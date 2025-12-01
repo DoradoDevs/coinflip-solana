@@ -294,6 +294,19 @@ async function showProfileModal() {
     const tierRates = { 'Starter': '0%', 'Bronze': '2.5%', 'Silver': '5%', 'Gold': '7.5%', 'Diamond': '10%' };
     document.getElementById('profileReferralRate').textContent = tierRates[currentUser.tier] || '0%';
 
+    // Token holder benefits (only show if user holds tokens)
+    const tokenSection = document.getElementById('tokenBenefitsSection');
+    if (currentUser.token_tier && currentUser.token_balance > 0) {
+        tokenSection.style.display = 'block';
+        document.getElementById('profileTokenTier').textContent = currentUser.token_tier;
+        document.getElementById('profileTokenBalance').textContent = currentUser.token_balance.toLocaleString();
+        document.getElementById('profileTokenDiscount').textContent = `${(currentUser.token_discount * 100).toFixed(0)}%`;
+        document.getElementById('profileCombinedDiscount').textContent = `${(currentUser.combined_discount * 100).toFixed(0)}%`;
+        document.getElementById('profileEffectiveFee').textContent = `${(currentUser.effective_fee_rate * 100).toFixed(2)}%`;
+    } else {
+        tokenSection.style.display = 'none';
+    }
+
     document.getElementById('profileModal').style.display = 'flex';
 }
 
