@@ -1957,7 +1957,7 @@ async def admin_list_wagers(http_request: Request, status: Optional[str] = None,
 
 @app.post("/api/admin/wager/{wager_id}/refund")
 async def admin_refund_wager(wager_id: str, http_request: Request):
-    """Recover funds from any wager's escrow to the creator's payout wallet (admin only).
+    """Recover funds from BOTH escrows (creator and acceptor) to their respective wallets (admin only).
 
     This works for ANY wager status - admin can always recover stuck funds.
     """
@@ -1970,74 +1970,143 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
     if not wager:
         raise HTTPException(status_code=404, detail="Wager not found")
 
-    # Admin can recover from ANY status - no status restriction
-    # This ensures funds are never stuck
+    # Track refund results
+    total_refunded = 0.0
+    refund_results = []
 
-    if not wager.creator_escrow_address or not wager.creator_escrow_secret:
-        raise HTTPException(status_code=400, detail="Wager has no escrow wallet")
+    # === REFUND CREATOR ESCROW ===
+    if wager.creator_escrow_address and wager.creator_escrow_secret:
+        try:
+            # Get creator's payout wallet (preferred) or fall back to creator_wallet
+            creator = db.get_user(wager.creator_id)
+            creator_destination = wager.creator_wallet  # default fallback
+            if creator and creator.payout_wallet:
+                creator_destination = creator.payout_wallet
+                logger.info(f"[REFUND] Using creator's payout wallet: {creator_destination}")
+            else:
+                logger.info(f"[REFUND] No payout wallet set, using creator wallet: {creator_destination}")
 
-    # Get creator's payout wallet (preferred) or fall back to creator_wallet
-    creator = db.get_user(wager.creator_id)
-    refund_destination = wager.creator_wallet  # default fallback
-    if creator and creator.payout_wallet:
-        refund_destination = creator.payout_wallet
-        logger.info(f"[REFUND] Using creator's payout wallet: {refund_destination}")
-    else:
-        logger.info(f"[REFUND] No payout wallet set, using creator wallet: {refund_destination}")
+            # Check creator escrow balance
+            creator_balance = await get_sol_balance(RPC_URL, wager.creator_escrow_address)
+            logger.info(f"[REFUND] Creator escrow {wager.creator_escrow_address} balance: {creator_balance} SOL")
 
-    # Check escrow balance
-    try:
-        balance = await get_sol_balance(RPC_URL, wager.creator_escrow_address)
-        logger.info(f"[REFUND] Escrow {wager.creator_escrow_address} balance: {balance} SOL")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to check escrow balance: {e}")
+            if creator_balance >= 0.001:
+                # Decrypt escrow secret
+                creator_escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
 
-    if balance < 0.001:
-        # Just mark as refunded if no balance
-        wager.status = "refunded"
-        db.save_wager(wager)
-        return {
-            "success": True,
-            "message": "No balance in escrow. Wager marked as refunded.",
-            "wager_id": wager_id,
-            "refunded_amount": 0
-        }
+                # Calculate refund (leave tiny amount for rent)
+                creator_refund_amount = creator_balance - 0.000005
 
-    # Decrypt escrow secret
-    try:
-        escrow_secret = decrypt_secret(wager.creator_escrow_secret, ENCRYPTION_KEY)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to decrypt escrow: {e}")
+                # Execute refund
+                logger.info(f"[REFUND] Sending {creator_refund_amount} SOL from creator escrow to {creator_destination}")
+                creator_tx_sig = await transfer_sol(
+                    RPC_URL,
+                    creator_escrow_secret,
+                    creator_destination,
+                    creator_refund_amount
+                )
 
-    # Calculate refund (leave tiny amount for tx fee)
-    refund_amount = balance - 0.000005
+                total_refunded += creator_refund_amount
+                refund_results.append({
+                    "escrow_type": "creator",
+                    "amount": creator_refund_amount,
+                    "destination": creator_destination,
+                    "tx_signature": creator_tx_sig,
+                    "solscan_url": f"https://solscan.io/tx/{creator_tx_sig}"
+                })
 
-    # Execute refund to payout wallet
-    logger.info(f"[REFUND] Sending {refund_amount} SOL to {refund_destination}")
-    try:
-        tx_sig = await transfer_sol(
-            RPC_URL,
-            escrow_secret,
-            refund_destination,
-            refund_amount
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Refund transfer failed: {e}")
+                logger.info(f"[REFUND] Creator escrow refunded: {creator_refund_amount} SOL (tx: {creator_tx_sig})")
+            else:
+                logger.info(f"[REFUND] Creator escrow balance too low ({creator_balance} SOL), skipping")
+                refund_results.append({
+                    "escrow_type": "creator",
+                    "amount": 0,
+                    "message": f"Balance too low ({creator_balance:.6f} SOL)"
+                })
+
+        except Exception as e:
+            logger.error(f"[REFUND] Failed to refund creator escrow: {e}")
+            refund_results.append({
+                "escrow_type": "creator",
+                "error": str(e)
+            })
+
+    # === REFUND ACCEPTOR ESCROW ===
+    if wager.acceptor_escrow_address and wager.acceptor_escrow_secret:
+        try:
+            # Get acceptor's payout wallet (preferred) or fall back to acceptor_wallet
+            acceptor_destination = wager.acceptor_wallet  # default fallback
+            if wager.acceptor_id:
+                acceptor = db.get_user(wager.acceptor_id)
+                if acceptor and acceptor.payout_wallet:
+                    acceptor_destination = acceptor.payout_wallet
+                    logger.info(f"[REFUND] Using acceptor's payout wallet: {acceptor_destination}")
+
+            if not acceptor_destination:
+                logger.warning(f"[REFUND] No acceptor wallet found, cannot refund acceptor escrow")
+                refund_results.append({
+                    "escrow_type": "acceptor",
+                    "error": "No acceptor wallet address available"
+                })
+            else:
+                # Check acceptor escrow balance
+                acceptor_balance = await get_sol_balance(RPC_URL, wager.acceptor_escrow_address)
+                logger.info(f"[REFUND] Acceptor escrow {wager.acceptor_escrow_address} balance: {acceptor_balance} SOL")
+
+                if acceptor_balance >= 0.001:
+                    # Decrypt escrow secret
+                    acceptor_escrow_secret = decrypt_secret(wager.acceptor_escrow_secret, ENCRYPTION_KEY)
+
+                    # Calculate refund (leave tiny amount for rent)
+                    acceptor_refund_amount = acceptor_balance - 0.000005
+
+                    # Execute refund
+                    logger.info(f"[REFUND] Sending {acceptor_refund_amount} SOL from acceptor escrow to {acceptor_destination}")
+                    acceptor_tx_sig = await transfer_sol(
+                        RPC_URL,
+                        acceptor_escrow_secret,
+                        acceptor_destination,
+                        acceptor_refund_amount
+                    )
+
+                    total_refunded += acceptor_refund_amount
+                    refund_results.append({
+                        "escrow_type": "acceptor",
+                        "amount": acceptor_refund_amount,
+                        "destination": acceptor_destination,
+                        "tx_signature": acceptor_tx_sig,
+                        "solscan_url": f"https://solscan.io/tx/{acceptor_tx_sig}"
+                    })
+
+                    logger.info(f"[REFUND] Acceptor escrow refunded: {acceptor_refund_amount} SOL (tx: {acceptor_tx_sig})")
+                else:
+                    logger.info(f"[REFUND] Acceptor escrow balance too low ({acceptor_balance} SOL), skipping")
+                    refund_results.append({
+                        "escrow_type": "acceptor",
+                        "amount": 0,
+                        "message": f"Balance too low ({acceptor_balance:.6f} SOL)"
+                    })
+
+        except Exception as e:
+            logger.error(f"[REFUND] Failed to refund acceptor escrow: {e}")
+            refund_results.append({
+                "escrow_type": "acceptor",
+                "error": str(e)
+            })
 
     # Update wager status
-    wager.status = "refunded"
-    db.save_wager(wager)
+    if total_refunded > 0:
+        wager.status = "refunded"
+        db.save_wager(wager)
 
-    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {refund_amount} SOL to {refund_destination}")
+    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {total_refunded:.6f} SOL total")
 
     return {
         "success": True,
-        "message": f"Refunded {refund_amount:.6f} SOL to {refund_destination}",
+        "message": f"Refunded {total_refunded:.6f} SOL total from {len(refund_results)} escrow(s)",
         "wager_id": wager_id,
-        "refunded_amount": refund_amount,
-        "refund_destination": refund_destination,
-        "tx_signature": tx_sig,
-        "solscan_url": f"https://solscan.io/tx/{tx_sig}"
+        "total_refunded": total_refunded,
+        "refunds": refund_results
     }
 
 
