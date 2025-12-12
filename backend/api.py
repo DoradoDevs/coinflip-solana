@@ -1304,6 +1304,18 @@ async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http
             creator = ensure_web_user(wager.creator_wallet)
             logger.info(f"[WAGER] Creator not found by ID, created/found via wallet: {wager.creator_wallet}")
 
+        # CRITICAL FIX: Ensure both users have connected_wallet set for the game
+        # This fixes "One or both players have no wallet" error
+        if not creator.connected_wallet:
+            creator.connected_wallet = wager.creator_wallet
+            db.save_user(creator)
+            logger.info(f"[WAGER] Set creator connected_wallet to {wager.creator_wallet}")
+
+        if not user.connected_wallet:
+            user.connected_wallet = request.acceptor_wallet
+            db.save_user(user)
+            logger.info(f"[WAGER] Set acceptor connected_wallet to {request.acceptor_wallet}")
+
         # SECURITY: Atomically accept wager (prevents double-acceptance race condition)
         # This uses an exclusive database lock to ensure only one user can accept
         accepted = db.atomic_accept_wager(wager_id, user.user_id)
