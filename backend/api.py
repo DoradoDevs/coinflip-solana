@@ -1388,8 +1388,13 @@ async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http
             creator.total_won += payout
             user.total_lost += wager.amount
 
+        logger.info(f"📊 Updating stats for {user.username} - Games: {user.games_played}, Wagered: {user.total_wagered}, Won: {user.games_won}")
+        logger.info(f"📊 Updating stats for {creator.username} - Games: {creator.games_played}, Wagered: {creator.total_wagered}, Won: {creator.games_won}")
+
         db.save_user(creator)
         db.save_user(user)
+
+        logger.info(f"✅ Stats saved for both players")
 
         logger.info(f"Web user {request.acceptor_wallet} accepted wager {wager_id}")
 
