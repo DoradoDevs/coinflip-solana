@@ -51,9 +51,12 @@ from auth import (
     validate_username,
     validate_password,
     validate_referral_code,
-    calculate_tier,
-    TIER_THRESHOLDS,
     TIER_REFERRAL_RATES,
+)
+from tiers import (
+    calculate_tier,
+    TIERS as TIER_THRESHOLDS,
+    update_user_tier,
 )
 from token_config import (
     TOKEN_ENABLED,
@@ -373,8 +376,8 @@ def get_tier_progress(total_wagered: float, current_tier: str) -> dict:
         }
 
     next_tier = tier_order[current_idx + 1]
-    current_threshold = TIER_THRESHOLDS[current_tier]
-    next_threshold = TIER_THRESHOLDS[next_tier]
+    current_threshold = TIER_THRESHOLDS[current_tier]["min_volume"]
+    next_threshold = TIER_THRESHOLDS[next_tier]["min_volume"]
 
     volume_in_tier = total_wagered - current_threshold
     tier_range = next_threshold - current_threshold
