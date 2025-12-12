@@ -1275,7 +1275,14 @@ async def accept_wager_endpoint(wager_id: str, request: AcceptWagerRequest, http
     check_rate_limit(http_request, "accept_wager", max_requests=20, window_seconds=60)
 
     try:
-        user = ensure_web_user(request.acceptor_wallet)
+        # Get the logged-in user (not anonymous wallet user!)
+        user = get_current_user(http_request)
+        if not user:
+            # Fallback to wallet-based user if not logged in
+            user = ensure_web_user(request.acceptor_wallet)
+            logger.info(f"[WAGER] Using anonymous wallet user for {request.acceptor_wallet}")
+        else:
+            logger.info(f"[WAGER] Using logged-in user: {user.username} (ID: {user.user_id})")
 
         # Get wager using path parameter
         wager = db.get_wager(wager_id)
