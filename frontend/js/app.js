@@ -1017,29 +1017,76 @@ function showGameResult(result) {
     const isWinner = result.winner_wallet === acceptWagerState.acceptorWallet;
     const payout = (acceptWagerState.amount * 2) * 0.98;
 
+    // Determine which animation to play
+    const animationFile = result.result === 'heads'
+        ? 'animations/Coin Flip Animation.mp4'
+        : 'animations/Coin Flip Animation Kek God.mp4';
+
+    // Show animation first
+    resultContainer.innerHTML = `
+        <div class="animation-container" style="text-align: center; position: relative;">
+            <video id="coinFlipVideo" autoplay muted style="max-width: 100%; max-height: 400px; border-radius: 12px;">
+                <source src="${animationFile}" type="video/mp4">
+                Your browser does not support video playback.
+            </video>
+            <button class="btn btn-secondary" onclick="skipAnimation()" id="skipAnimationBtn"
+                    style="margin-top: 20px; padding: 12px 24px;">
+                Skip Animation
+            </button>
+        </div>
+    `;
+
+    // Store result data for after animation
+    window.pendingGameResult = {
+        isWinner,
+        result: result.result,
+        yourSide: acceptWagerState.yourSide,
+        payout,
+        amount: acceptWagerState.amount,
+        blockhash: result.blockhash
+    };
+
+    // Auto-show result when video ends
+    const video = document.getElementById('coinFlipVideo');
+    video.addEventListener('ended', showFinalResult);
+
+    document.getElementById('acceptStep2').style.display = 'none';
+    document.getElementById('acceptStep3').style.display = 'block';
+}
+
+function skipAnimation() {
+    showFinalResult();
+}
+
+function showFinalResult() {
+    const resultContainer = document.getElementById('gameResultContent');
+    const data = window.pendingGameResult;
+
+    if (!data) return;
+
     let html = '';
 
-    if (isWinner) {
+    if (data.isWinner) {
         html = `
             <div class="result-icon win-icon">WIN</div>
             <h2 class="result-title win">YOU WON!</h2>
             <div class="result-details">
                 <div class="result-row">
                     <span>Coin Result:</span>
-                    <span>${result.result.toUpperCase()}</span>
+                    <span>${data.result.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Your Side:</span>
-                    <span>${acceptWagerState.yourSide.toUpperCase()}</span>
+                    <span>${data.yourSide.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Payout:</span>
-                    <span style="color: var(--success); font-weight: 700;">${payout.toFixed(4)} SOL</span>
+                    <span style="color: var(--success); font-weight: 700;">${data.payout.toFixed(4)} SOL</span>
                 </div>
             </div>
             <p class="fairness-note">
                 Provably Fair<br>
-                <small>Blockhash: ${result.blockhash ? result.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
+                <small>Blockhash: ${data.blockhash ? data.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
             </p>
         `;
     } else {
@@ -1049,28 +1096,26 @@ function showGameResult(result) {
             <div class="result-details">
                 <div class="result-row">
                     <span>Coin Result:</span>
-                    <span>${result.result.toUpperCase()}</span>
+                    <span>${data.result.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Your Side:</span>
-                    <span>${acceptWagerState.yourSide.toUpperCase()}</span>
+                    <span>${data.yourSide.toUpperCase()}</span>
                 </div>
                 <div class="result-row">
                     <span>Lost:</span>
-                    <span style="color: var(--danger); font-weight: 700;">${acceptWagerState.amount} SOL</span>
+                    <span style="color: var(--danger); font-weight: 700;">${data.amount} SOL</span>
                 </div>
             </div>
             <p class="fairness-note">
                 Provably Fair<br>
-                <small>Blockhash: ${result.blockhash ? result.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
+                <small>Blockhash: ${data.blockhash ? data.blockhash.slice(0, 20) + '...' : 'N/A'}</small>
             </p>
         `;
     }
 
     resultContainer.innerHTML = html;
-
-    document.getElementById('acceptStep2').style.display = 'none';
-    document.getElementById('acceptStep3').style.display = 'block';
+    window.pendingGameResult = null;
 }
 
 // ============================================
