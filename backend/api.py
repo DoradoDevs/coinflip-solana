@@ -552,7 +552,7 @@ async def get_me(http_request: Request) -> ProfileResponse:
     user = require_auth(http_request)
 
     # Update tier based on volume
-    tier, fee_rate = calculate_tier(user.total_wagered)
+    tier, fee_rate, _ = calculate_tier(user.total_wagered)
     if tier != user.tier:
         user.tier = tier
         user.tier_fee_rate = fee_rate
