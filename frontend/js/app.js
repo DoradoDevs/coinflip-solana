@@ -1023,22 +1023,7 @@ function showGameResult(result) {
         ? 'animations/Coin Flip Animation.mp4'
         : 'animations/Coin Flip Animation Kek God.mp4';
 
-    // Show animation first
-    resultContainer.innerHTML = `
-        <div class="animation-container" style="text-align: center; position: relative; padding: 20px;">
-            <h2 style="margin-bottom: 20px; color: var(--primary);">Flipping the coin...</h2>
-            <video id="coinFlipVideo" autoplay playsinline style="width: 90%; max-width: 500px; height: auto; border-radius: 12px; background: #000;">
-                <source src="${animationFile}" type="video/mp4">
-                Your browser does not support video playback.
-            </video>
-            <button class="btn btn-secondary" onclick="skipAnimation()" id="skipAnimationBtn"
-                    style="margin-top: 20px; padding: 12px 24px; display: block; margin-left: auto; margin-right: auto;">
-                Skip Animation
-            </button>
-        </div>
-    `;
-
-    // Store result data for after animation
+    // Store result data first
     window.pendingGameResult = {
         isWinner,
         result: result.result,
@@ -1048,12 +1033,50 @@ function showGameResult(result) {
         blockhash: result.blockhash
     };
 
-    // Auto-show result when video ends
-    const video = document.getElementById('coinFlipVideo');
-    video.addEventListener('ended', showFinalResult);
-
+    // Show modal step first
     document.getElementById('acceptStep2').style.display = 'none';
     document.getElementById('acceptStep3').style.display = 'block';
+
+    // Show animation
+    resultContainer.innerHTML = `
+        <div class="animation-container" style="text-align: center; padding: 30px; background: var(--surface); border-radius: 12px; min-height: 400px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <h2 style="margin-bottom: 30px; color: var(--primary); font-size: 2rem;">🪙 Flipping the coin...</h2>
+            <video id="coinFlipVideo" autoplay playsinline controls style="width: 100%; max-width: 600px; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+                <source src="${animationFile}" type="video/mp4">
+                Your browser does not support video playback.
+            </video>
+            <button class="btn btn-primary" onclick="skipAnimation()" id="skipAnimationBtn"
+                    style="margin-top: 30px; padding: 14px 30px; font-size: 1.1rem;">
+                Skip Animation →
+            </button>
+        </div>
+    `;
+
+    // Wait for video element to be in DOM, then set up event listeners
+    setTimeout(() => {
+        const video = document.getElementById('coinFlipVideo');
+        if (video) {
+            console.log('Video element found, setting up listeners');
+            console.log('Video source:', animationFile);
+
+            video.addEventListener('ended', () => {
+                console.log('Video ended, showing result');
+                showFinalResult();
+            });
+
+            video.addEventListener('error', (e) => {
+                console.error('Video error:', e);
+                alert('Failed to load animation. Showing result...');
+                showFinalResult();
+            });
+
+            video.addEventListener('loadeddata', () => {
+                console.log('Video loaded successfully');
+            });
+        } else {
+            console.error('Video element not found!');
+        }
+    }, 100);
 }
 
 function skipAnimation() {
