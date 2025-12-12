@@ -1017,9 +1017,14 @@ async function verifyAcceptDeposit() {
 
     try {
         // Accept wager and execute coinflip
+        const headers = { 'Content-Type': 'application/json' };
+        if (sessionToken) {
+            headers['Authorization'] = `Bearer ${sessionToken}`;
+        }
+
         const response = await fetch(`${API_BASE}/api/wager/${acceptWagerState.wagerId}/accept`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({
                 acceptor_wallet: acceptWagerState.acceptorWallet,
                 deposit_tx_signature: txSignature,
