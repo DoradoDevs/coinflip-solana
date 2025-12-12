@@ -1014,7 +1014,6 @@ async function verifyAcceptDeposit() {
 }
 
 function showGameResult(result) {
-    const resultContainer = document.getElementById('gameResultContent');
     const isWinner = result.winner_wallet === acceptWagerState.acceptorWallet;
     const payout = (acceptWagerState.amount * 2) * 0.98;
 
@@ -1022,6 +1021,9 @@ function showGameResult(result) {
     const animationFile = result.result === 'heads'
         ? 'animations/Coin Flip Animation.mp4'
         : 'animations/Coin Flip Animation Kek God.mp4';
+
+    console.log('🎬 ANIMATION START - File:', animationFile);
+    alert('ANIMATION STARTING NOW - File: ' + animationFile);
 
     // Store result data first
     window.pendingGameResult = {
@@ -1033,90 +1035,121 @@ function showGameResult(result) {
         blockhash: result.blockhash
     };
 
-    // Show modal step first
-    document.getElementById('acceptStep2').style.display = 'none';
-    document.getElementById('acceptStep3').style.display = 'block';
-
-    // Expand modal for animation
-    const modal = document.getElementById('acceptWagerModal');
-    const modalContent = modal.querySelector('.modal-content');
-    if (modalContent) {
-        modalContent.style.maxWidth = '800px';
-    }
-
-    // Show animation with better visibility
-    resultContainer.innerHTML = `
-        <div style="position: relative; width: 100%; background: #000; padding: 20px; border-radius: 12px;">
-            <h2 style="text-align: center; color: #FFD700; font-size: 1.5rem; margin-bottom: 15px;">🪙 Flipping the coin...</h2>
-            <video id="coinFlipVideo" autoplay playsinline controls
-                   style="display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto; border-radius: 8px; background: #000;">
-                <source src="${animationFile}" type="video/mp4">
-                Your browser does not support video playback.
-            </video>
-            <div style="text-align: center; margin-top: 20px;">
-                <button class="btn btn-primary" onclick="skipAnimation()"
-                        style="padding: 12px 30px; font-size: 1.1rem; background: #14F195; color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
-                    Skip Animation →
-                </button>
-            </div>
-            <p id="videoDebug" style="color: #FFD700; text-align: center; margin-top: 15px; font-size: 0.85rem;"></p>
-        </div>
+    // Create a fullscreen overlay for the animation (CANNOT BE MISSED)
+    const overlay = document.createElement('div');
+    overlay.id = 'animationOverlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.95);
+        z-index: 999999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
     `;
 
-    // Wait for video element to be in DOM, then set up event listeners
-    setTimeout(() => {
-        const video = document.getElementById('coinFlipVideo');
-        const debugEl = document.getElementById('videoDebug');
+    overlay.innerHTML = `
+        <h2 style="color: #FFD700; font-size: 2rem; margin-bottom: 20px; text-align: center;">
+            🪙 FLIPPING THE COIN...
+        </h2>
+        <video id="coinFlipVideo" autoplay playsinline
+               style="max-width: 90%; max-height: 70vh; width: auto; height: auto; border-radius: 12px; box-shadow: 0 0 50px rgba(20, 241, 149, 0.5);">
+            <source src="${animationFile}" type="video/mp4">
+            Your browser does not support video playback.
+        </video>
+        <div style="margin-top: 30px;">
+            <button onclick="skipAnimation()"
+                    style="padding: 15px 40px; font-size: 1.3rem; background: #14F195; color: #000; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 20px rgba(20, 241, 149, 0.4);">
+                SKIP ANIMATION →
+            </button>
+        </div>
+        <p id="videoStatus" style="color: #FFD700; margin-top: 20px; font-size: 1.2rem; font-weight: bold;">
+            INITIALIZING...
+        </p>
+    `;
 
-        if (video) {
-            console.log('Video element found, setting up listeners');
-            console.log('Video source:', animationFile);
-            console.log('Video style:', video.style.cssText);
-            console.log('Video dimensions:', video.offsetWidth, 'x', video.offsetHeight);
+    document.body.appendChild(overlay);
+    console.log('🎬 Overlay created and added to body');
 
-            if (debugEl) debugEl.textContent = `Loading: ${animationFile.split('/').pop()}`;
+    // Get video element immediately (no setTimeout)
+    const video = document.getElementById('coinFlipVideo');
+    const status = document.getElementById('videoStatus');
 
-            video.addEventListener('loadstart', () => {
-                console.log('Video loading started');
-                if (debugEl) debugEl.textContent = 'Loading video...';
-            });
+    console.log('🎬 Video element:', video ? 'FOUND' : 'NOT FOUND');
 
-            video.addEventListener('loadeddata', () => {
-                console.log('Video loaded successfully', video.videoWidth, 'x', video.videoHeight);
-                if (debugEl) debugEl.textContent = `Playing... (${video.duration.toFixed(1)}s)`;
-            });
+    if (!video) {
+        alert('ERROR: Video element not found!');
+        showFinalResult();
+        return;
+    }
 
-            video.addEventListener('playing', () => {
-                console.log('Video is playing');
-                if (debugEl) debugEl.textContent = 'Animation playing...';
-            });
+    status.textContent = `LOADING: ${animationFile.split('/').pop()}`;
 
-            video.addEventListener('ended', () => {
-                console.log('Video ended, showing result');
-                showFinalResult();
-            });
+    // Immediate event listeners
+    video.addEventListener('loadstart', () => {
+        console.log('🎬 VIDEO LOADING STARTED');
+        status.textContent = 'LOADING VIDEO...';
+    });
 
-            video.addEventListener('error', (e) => {
-                console.error('Video error:', e, video.error);
-                if (debugEl) debugEl.textContent = `Error loading video: ${video.error ? video.error.message : 'Unknown error'}`;
-                alert('Failed to load animation: ' + (video.error ? video.error.message : 'Unknown') + '\n\nShowing result...');
-                showFinalResult();
-            });
-        } else {
-            console.error('Video element not found!');
-        }
-    }, 100);
+    video.addEventListener('loadeddata', () => {
+        console.log('🎬 VIDEO LOADED - Duration:', video.duration, 'seconds');
+        status.textContent = `PLAYING... (${video.duration.toFixed(1)}s)`;
+    });
+
+    video.addEventListener('playing', () => {
+        console.log('🎬 VIDEO IS PLAYING NOW');
+        status.textContent = 'ANIMATION PLAYING...';
+    });
+
+    video.addEventListener('ended', () => {
+        console.log('🎬 VIDEO ENDED');
+        const overlay = document.getElementById('animationOverlay');
+        if (overlay) overlay.remove();
+        showFinalResult();
+    });
+
+    video.addEventListener('error', (e) => {
+        console.error('🎬 VIDEO ERROR:', e, video.error);
+        alert('VIDEO ERROR: ' + (video.error ? video.error.message : 'Unknown'));
+        const overlay = document.getElementById('animationOverlay');
+        if (overlay) overlay.remove();
+        showFinalResult();
+    });
+
+    console.log('🎬 Event listeners attached, video should start playing');
 }
 
 function skipAnimation() {
+    console.log('🎬 SKIP ANIMATION clicked');
+    const overlay = document.getElementById('animationOverlay');
+    if (overlay) {
+        overlay.remove();
+        console.log('🎬 Overlay removed');
+    }
     showFinalResult();
 }
 
 function showFinalResult() {
+    console.log('🎬 SHOWING FINAL RESULT');
+
+    // Show modal step 3
+    document.getElementById('acceptStep2').style.display = 'none';
+    document.getElementById('acceptStep3').style.display = 'block';
+
     const resultContainer = document.getElementById('gameResultContent');
     const data = window.pendingGameResult;
 
-    if (!data) return;
+    if (!data) {
+        console.error('🎬 ERROR: No pending game result data!');
+        return;
+    }
+
+    console.log('🎬 Result data:', data);
 
     // Reset modal size
     const modal = document.getElementById('acceptWagerModal');
