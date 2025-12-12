@@ -1037,24 +1037,29 @@ function showGameResult(result) {
     document.getElementById('acceptStep2').style.display = 'none';
     document.getElementById('acceptStep3').style.display = 'block';
 
+    // Expand modal for animation
+    const modal = document.getElementById('acceptWagerModal');
+    const modalContent = modal.querySelector('.modal-content');
+    if (modalContent) {
+        modalContent.style.maxWidth = '800px';
+    }
+
     // Show animation with better visibility
     resultContainer.innerHTML = `
-        <div style="position: relative; width: 100%; background: #000; padding: 40px 20px; border-radius: 12px;">
-            <h2 style="text-align: center; color: #FFD700; font-size: 2rem; margin-bottom: 20px;">🪙 Flipping the coin...</h2>
-            <div style="position: relative; width: 100%; max-width: 700px; margin: 0 auto; background: #1a1a1a; border-radius: 8px; padding: 20px;">
-                <video id="coinFlipVideo" autoplay playsinline controls loop
-                       style="display: block; width: 100%; height: auto; max-height: 500px; margin: 0 auto; border-radius: 8px;">
-                    <source src="${animationFile}" type="video/mp4">
-                    Your browser does not support video playback.
-                </video>
-            </div>
-            <div style="text-align: center; margin-top: 30px;">
+        <div style="position: relative; width: 100%; background: #000; padding: 20px; border-radius: 12px;">
+            <h2 style="text-align: center; color: #FFD700; font-size: 1.5rem; margin-bottom: 15px;">🪙 Flipping the coin...</h2>
+            <video id="coinFlipVideo" autoplay playsinline controls
+                   style="display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto; border-radius: 8px; background: #000;">
+                <source src="${animationFile}" type="video/mp4">
+                Your browser does not support video playback.
+            </video>
+            <div style="text-align: center; margin-top: 20px;">
                 <button class="btn btn-primary" onclick="skipAnimation()"
-                        style="padding: 15px 40px; font-size: 1.2rem; background: #14F195; color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                        style="padding: 12px 30px; font-size: 1.1rem; background: #14F195; color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
                     Skip Animation →
                 </button>
             </div>
-            <p id="videoDebug" style="color: #FFD700; text-align: center; margin-top: 20px; font-size: 0.9rem;"></p>
+            <p id="videoDebug" style="color: #FFD700; text-align: center; margin-top: 15px; font-size: 0.85rem;"></p>
         </div>
     `;
 
@@ -1112,6 +1117,13 @@ function showFinalResult() {
     const data = window.pendingGameResult;
 
     if (!data) return;
+
+    // Reset modal size
+    const modal = document.getElementById('acceptWagerModal');
+    const modalContent = modal.querySelector('.modal-content');
+    if (modalContent) {
+        modalContent.style.maxWidth = '500px';
+    }
 
     let html = '';
 
