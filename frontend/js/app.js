@@ -66,9 +66,20 @@ async function checkSession() {
 
         if (response.ok) {
             currentUser = await response.json();
+            console.log('✅ Session refreshed - User data:', {
+                username: currentUser.username,
+                games_played: currentUser.games_played,
+                games_won: currentUser.games_won,
+                total_wagered: currentUser.total_wagered,
+                total_won: currentUser.total_won,
+                total_lost: currentUser.total_lost,
+                tier: currentUser.tier,
+                tier_progress: currentUser.tier_progress
+            });
             updateAuthUI(true);
         } else {
             // Session expired
+            console.log('❌ Session expired');
             localStorage.removeItem('session_token');
             sessionToken = null;
             updateAuthUI(false);
@@ -259,25 +270,51 @@ async function showProfileModal() {
 
     if (!currentUser) return;
 
-    // Populate profile data
-    document.getElementById('profileGamesPlayed').textContent = currentUser.games_played;
-    document.getElementById('profileWinRate').textContent = currentUser.win_rate;
-    document.getElementById('profileVolume').textContent = currentUser.total_wagered.toFixed(2);
+    console.log('👤 Profile data:', currentUser);
 
-    const profit = currentUser.total_won - currentUser.total_lost;
+    // Populate profile data with fallbacks
+    const gamesPlayed = currentUser.games_played || 0;
+    const totalWon = currentUser.total_won || 0;
+    const totalLost = currentUser.total_lost || 0;
+    const totalWagered = currentUser.total_wagered || 0;
+
+    // Calculate win rate
+    let winRate = '0.0%';
+    if (gamesPlayed > 0) {
+        const wins = currentUser.games_won || 0;
+        const rate = (wins / gamesPlayed) * 100;
+        winRate = rate.toFixed(1) + '%';
+    }
+
+    document.getElementById('profileGamesPlayed').textContent = gamesPlayed;
+    document.getElementById('profileWinRate').textContent = winRate;
+    document.getElementById('profileVolume').textContent = totalWagered.toFixed(2);
+
+    const profit = totalWon - totalLost;
     document.getElementById('profileProfit').textContent = profit >= 0 ? `+${profit.toFixed(2)}` : profit.toFixed(2);
     document.getElementById('profileProfit').style.color = profit >= 0 ? 'var(--success)' : 'var(--danger)';
 
     // Tier
-    document.getElementById('profileTier').textContent = currentUser.tier;
-    document.getElementById('tierProgressFill').style.width = `${currentUser.tier_progress.progress_percent}%`;
+    document.getElementById('profileTier').textContent = currentUser.tier || 'Starter';
 
-    if (currentUser.tier_progress.next_tier) {
-        document.getElementById('tierProgressText').textContent =
-            `${currentUser.tier_progress.volume_needed.toFixed(2)} SOL to ${currentUser.tier_progress.next_tier}`;
+    // Tier progress
+    if (currentUser.tier_progress) {
+        const progressPercent = currentUser.tier_progress.progress_percent || 0;
+        document.getElementById('tierProgressFill').style.width = `${progressPercent}%`;
+
+        if (currentUser.tier_progress.next_tier) {
+            const volumeNeeded = currentUser.tier_progress.volume_needed || 0;
+            document.getElementById('tierProgressText').textContent =
+                `${volumeNeeded.toFixed(2)} SOL to ${currentUser.tier_progress.next_tier}`;
+        } else {
+            document.getElementById('tierProgressText').textContent = 'Max tier reached!';
+        }
     } else {
-        document.getElementById('tierProgressText').textContent = 'Max tier reached!';
+        document.getElementById('tierProgressFill').style.width = '0%';
+        document.getElementById('tierProgressText').textContent = '10.00 SOL to Bronze';
     }
+
+    console.log('👤 Profile updated - Games:', gamesPlayed, 'Win Rate:', winRate, 'Volume:', totalWagered)
 
     // Payout wallet
     document.getElementById('profilePayoutWallet').value = currentUser.payout_wallet || '';
