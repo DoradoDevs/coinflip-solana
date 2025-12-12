@@ -1000,8 +1000,9 @@ async function verifyAcceptDeposit() {
         // Show result
         showGameResult(result);
 
-        // Refresh wagers list
+        // Refresh wagers list and user stats
         loadActiveWagers();
+        await checkSession(); // Refresh user stats (tier progress, volume, etc.)
 
     } catch (err) {
         console.error('Error accepting wager:', err);
@@ -1024,13 +1025,14 @@ function showGameResult(result) {
 
     // Show animation first
     resultContainer.innerHTML = `
-        <div class="animation-container" style="text-align: center; position: relative;">
-            <video id="coinFlipVideo" autoplay muted style="max-width: 100%; max-height: 400px; border-radius: 12px;">
+        <div class="animation-container" style="text-align: center; position: relative; padding: 20px;">
+            <h2 style="margin-bottom: 20px; color: var(--primary);">Flipping the coin...</h2>
+            <video id="coinFlipVideo" autoplay playsinline style="width: 90%; max-width: 500px; height: auto; border-radius: 12px; background: #000;">
                 <source src="${animationFile}" type="video/mp4">
                 Your browser does not support video playback.
             </video>
             <button class="btn btn-secondary" onclick="skipAnimation()" id="skipAnimationBtn"
-                    style="margin-top: 20px; padding: 12px 24px;">
+                    style="margin-top: 20px; padding: 12px 24px; display: block; margin-left: auto; margin-right: auto;">
                 Skip Animation
             </button>
         </div>
