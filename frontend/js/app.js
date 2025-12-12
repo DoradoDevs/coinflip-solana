@@ -1037,27 +1037,54 @@ function showGameResult(result) {
     document.getElementById('acceptStep2').style.display = 'none';
     document.getElementById('acceptStep3').style.display = 'block';
 
-    // Show animation
+    // Show animation with better visibility
     resultContainer.innerHTML = `
-        <div class="animation-container" style="text-align: center; padding: 30px; background: var(--surface); border-radius: 12px; min-height: 400px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-            <h2 style="margin-bottom: 30px; color: var(--primary); font-size: 2rem;">🪙 Flipping the coin...</h2>
-            <video id="coinFlipVideo" autoplay playsinline controls style="width: 100%; max-width: 600px; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
-                <source src="${animationFile}" type="video/mp4">
-                Your browser does not support video playback.
-            </video>
-            <button class="btn btn-primary" onclick="skipAnimation()" id="skipAnimationBtn"
-                    style="margin-top: 30px; padding: 14px 30px; font-size: 1.1rem;">
-                Skip Animation →
-            </button>
+        <div style="position: relative; width: 100%; background: #000; padding: 40px 20px; border-radius: 12px;">
+            <h2 style="text-align: center; color: #FFD700; font-size: 2rem; margin-bottom: 20px;">🪙 Flipping the coin...</h2>
+            <div style="position: relative; width: 100%; max-width: 700px; margin: 0 auto; background: #1a1a1a; border-radius: 8px; padding: 20px;">
+                <video id="coinFlipVideo" autoplay playsinline controls loop
+                       style="display: block; width: 100%; height: auto; max-height: 500px; margin: 0 auto; border-radius: 8px;">
+                    <source src="${animationFile}" type="video/mp4">
+                    Your browser does not support video playback.
+                </video>
+            </div>
+            <div style="text-align: center; margin-top: 30px;">
+                <button class="btn btn-primary" onclick="skipAnimation()"
+                        style="padding: 15px 40px; font-size: 1.2rem; background: #14F195; color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    Skip Animation →
+                </button>
+            </div>
+            <p id="videoDebug" style="color: #FFD700; text-align: center; margin-top: 20px; font-size: 0.9rem;"></p>
         </div>
     `;
 
     // Wait for video element to be in DOM, then set up event listeners
     setTimeout(() => {
         const video = document.getElementById('coinFlipVideo');
+        const debugEl = document.getElementById('videoDebug');
+
         if (video) {
             console.log('Video element found, setting up listeners');
             console.log('Video source:', animationFile);
+            console.log('Video style:', video.style.cssText);
+            console.log('Video dimensions:', video.offsetWidth, 'x', video.offsetHeight);
+
+            if (debugEl) debugEl.textContent = `Loading: ${animationFile.split('/').pop()}`;
+
+            video.addEventListener('loadstart', () => {
+                console.log('Video loading started');
+                if (debugEl) debugEl.textContent = 'Loading video...';
+            });
+
+            video.addEventListener('loadeddata', () => {
+                console.log('Video loaded successfully', video.videoWidth, 'x', video.videoHeight);
+                if (debugEl) debugEl.textContent = `Playing... (${video.duration.toFixed(1)}s)`;
+            });
+
+            video.addEventListener('playing', () => {
+                console.log('Video is playing');
+                if (debugEl) debugEl.textContent = 'Animation playing...';
+            });
 
             video.addEventListener('ended', () => {
                 console.log('Video ended, showing result');
@@ -1065,13 +1092,10 @@ function showGameResult(result) {
             });
 
             video.addEventListener('error', (e) => {
-                console.error('Video error:', e);
-                alert('Failed to load animation. Showing result...');
+                console.error('Video error:', e, video.error);
+                if (debugEl) debugEl.textContent = `Error loading video: ${video.error ? video.error.message : 'Unknown error'}`;
+                alert('Failed to load animation: ' + (video.error ? video.error.message : 'Unknown') + '\n\nShowing result...');
                 showFinalResult();
-            });
-
-            video.addEventListener('loadeddata', () => {
-                console.log('Video loaded successfully');
             });
         } else {
             console.error('Video element not found!');
