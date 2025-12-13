@@ -1103,7 +1103,6 @@ function showGameResult(result) {
         : 'animations/Coin Flip Animation Kek God.mp4';
 
     console.log('🎬 ANIMATION START - File:', animationFile);
-    alert('ANIMATION STARTING NOW - File: ' + animationFile);
 
     // Store result data first
     window.pendingGameResult = {
