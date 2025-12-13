@@ -380,17 +380,17 @@ async def check_escrow_deposit(
                             lamports = info.get('lamports', 0)
                             actual_amount = lamports / LAMPORTS_PER_SOL
 
-                            logger.info(f"[DEPOSIT_CHECK] Found transfer: {actual_amount} SOL from {sender[:8]}... to {recipient[:8]}... (expecting from {expected_sender[:8]}... to {escrow_address[:8]}...)")
+                            logger.info(f"[DEPOSIT_CHECK] Found transfer: {actual_amount} SOL from {sender[:8]}... to {recipient[:8]}... (expecting to {escrow_address[:8]}...)")
 
-                            # Check if this matches our expected deposit
-                            if (sender == expected_sender and
-                                recipient == escrow_address and
+                            # Check if this matches our expected deposit (ACCEPT FROM ANY WALLET!)
+                            # We only check recipient and amount, NOT sender - users can send from any wallet they want
+                            if (recipient == escrow_address and
                                 abs(actual_amount - expected_amount) <= tolerance):
 
-                                logger.info(f"[DEPOSIT_CHECK] ✅ MATCH! Found deposit: {actual_amount} SOL from {sender} (tx: {tx_sig})")
+                                logger.info(f"[DEPOSIT_CHECK] ✅ MATCH! Found deposit: {actual_amount} SOL from {sender} to {recipient} (tx: {tx_sig})")
                                 return tx_sig
                             else:
-                                logger.info(f"[DEPOSIT_CHECK] No match: sender={sender==expected_sender}, recipient={recipient==escrow_address}, amount={abs(actual_amount - expected_amount) <= tolerance}")
+                                logger.info(f"[DEPOSIT_CHECK] No match: recipient={recipient==escrow_address}, amount_match={abs(actual_amount - expected_amount) <= tolerance} (diff={abs(actual_amount - expected_amount)})")
 
             logger.info(f"[DEPOSIT_CHECK] Balance sufficient but no matching transaction from {expected_sender}")
             return None
