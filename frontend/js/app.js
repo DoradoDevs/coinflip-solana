@@ -618,7 +618,6 @@ function openCreateModal() {
     document.getElementById('creatorWallet').value = currentUser?.payout_wallet || '';
     document.getElementById('wagerSummary').style.display = 'none';
     document.getElementById('continueBtn').disabled = true;
-    document.getElementById('depositTxSignature').value = '';
 
     // Show step 1
     document.getElementById('step1').style.display = 'block';
@@ -857,9 +856,6 @@ function openAcceptModal(wagerId, amount, creatorSide) {
         escrowAddress: null,
         depositAmount: totalDeposit
     };
-
-    // Reset UI
-    document.getElementById('acceptTxSignature').value = '';
 
     // Display the wallet that will receive winnings
     const walletDisplay = `${acceptorWallet.slice(0, 6)}...${acceptorWallet.slice(-6)}`;
