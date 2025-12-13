@@ -1234,6 +1234,8 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
         if not wager:
             raise HTTPException(status_code=404, detail="Wager not found")
 
+        logger.info(f"[CHECK-DEPOSIT] Called for {wager_id}, status={wager.status}, has_creator_escrow={bool(wager.creator_escrow_address)}, has_acceptor_escrow={bool(wager.acceptor_escrow_address)}")
+
         # Check which escrow to monitor based on wager status
         if wager.status == "pending_deposit":
             # Creator deposit check
@@ -1262,6 +1264,10 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
 
             logger.info(f"[CHECK-DEPOSIT] Checking acceptor deposit for {wager_id}: escrow={wager.acceptor_escrow_address}, acceptor={wager.acceptor_wallet}, amount={wager.amount}")
 
+            # Get escrow balance for debugging
+            from game.solana_ops import get_sol_balance
+            current_balance = await get_sol_balance(RPC_URL, wager.acceptor_escrow_address)
+
             tx_sig = await check_escrow_deposit(
                 RPC_URL,
                 wager.acceptor_escrow_address,
@@ -1278,6 +1284,17 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
                 }
             else:
                 logger.info(f"[CHECK-DEPOSIT] Acceptor deposit NOT found for {wager_id}")
+                # Return debug info
+                return {
+                    "deposit_found": False,
+                    "debug": {
+                        "escrow_address": wager.acceptor_escrow_address,
+                        "expected_sender": wager.acceptor_wallet,
+                        "expected_amount": wager.amount,
+                        "current_balance": current_balance,
+                        "wager_status": wager.status
+                    }
+                }
 
         return {"deposit_found": False, "wager_status": wager.status, "has_acceptor_escrow": bool(wager.acceptor_escrow_address), "has_acceptor_wallet": bool(wager.acceptor_wallet)}
 

@@ -1020,7 +1020,7 @@
         }
 
         async function refundWager(wagerId) {
-            if (!confirm(`Recover funds from ${wagerId}?\n\nThis will:\n- Check escrow balance\n- Transfer all funds to creator's payout wallet\n- Mark wager as refunded`)) {
+            if (!confirm(`Recover funds from ${wagerId}?\n\nThis will:\n- Check BOTH creator AND acceptor escrow balances\n- Transfer all funds to their respective payout wallets\n- Mark wager as refunded`)) {
                 return;
             }
 
@@ -1032,8 +1032,22 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    if (data.refunded_amount > 0) {
-                        alert(`Refund successful!\n\nAmount: ${data.refunded_amount.toFixed(6)} SOL\nTX: ${data.tx_signature}\n\nView on Solscan: ${data.solscan_url}`);
+                    if (data.total_refunded > 0) {
+                        // Build detailed message showing all refunds
+                        let message = `Refund successful!\n\nTotal: ${data.total_refunded.toFixed(6)} SOL\n\n`;
+
+                        data.refunds.forEach(refund => {
+                            const type = refund.escrow_type.toUpperCase();
+                            if (refund.error) {
+                                message += `${type}: ERROR - ${refund.error}\n`;
+                            } else if (refund.message) {
+                                message += `${type}: ${refund.message}\n`;
+                            } else if (refund.amount > 0) {
+                                message += `${type}: ${refund.amount.toFixed(6)} SOL to ${refund.destination.slice(0,6)}...${refund.destination.slice(-6)}\nTX: ${refund.tx_signature}\nSolscan: ${refund.solscan_url}\n\n`;
+                            }
+                        });
+
+                        alert(message);
                     } else {
                         alert(`Wager marked as refunded.\n\n${data.message}`);
                     }

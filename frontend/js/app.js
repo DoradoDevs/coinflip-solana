@@ -1005,6 +1005,11 @@ function startDepositMonitoring(wagerId, depositType) {
             const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
             const data = await response.json();
 
+            // Log debug info if available
+            if (data.debug) {
+                console.log('🔍 Deposit check debug:', data.debug);
+            }
+
             if (data.deposit_found && data.transaction_signature) {
                 // Deposit found!
                 clearInterval(depositMonitoringInterval);
@@ -1071,6 +1076,11 @@ function startCreateDepositMonitoring(wagerId) {
         try {
             const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
             const data = await response.json();
+
+            // Log debug info if available
+            if (data.debug) {
+                console.log('🔍 Deposit check debug:', data.debug);
+            }
 
             if (data.deposit_found && data.transaction_signature) {
                 // Deposit found!
