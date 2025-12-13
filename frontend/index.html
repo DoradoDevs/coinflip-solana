@@ -77,11 +77,6 @@
                             </div>
                         </div>
 
-                        <div class="step-section">
-                            <h3>3. Your Solana Address (to receive winnings)</h3>
-                            <input type="text" id="creatorWallet" class="wallet-input" placeholder="Your Solana wallet address">
-                        </div>
-
                         <div id="wagerSummary" class="wager-summary" style="display: none;">
                             <h3>Summary</h3>
                             <div class="summary-row">
@@ -328,6 +323,11 @@
                     <div class="form-group">
                         <label>Password</label>
                         <input type="password" id="registerPassword" class="form-input" placeholder="Min 8 chars, include number">
+                    </div>
+                    <div class="form-group">
+                        <label>Solana Wallet Address (for winnings) <span style="color: #ff4444;">*</span></label>
+                        <input type="text" id="registerWallet" class="form-input" placeholder="Your Solana wallet address" required>
+                        <small style="color: #999; font-size: 12px;">This wallet will receive your winnings. Make sure it's correct!</small>
                     </div>
                     <div class="form-group">
                         <label>Referral Code (optional)</label>

@@ -190,11 +190,18 @@ async function handleRegister() {
     const email = document.getElementById('registerEmail').value.trim();
     const username = document.getElementById('registerUsername').value.trim();
     const password = document.getElementById('registerPassword').value;
+    const wallet = document.getElementById('registerWallet').value.trim();
     const referralEl = document.getElementById('registerReferral');
     const referralCode = referralEl ? referralEl.value.trim() : '';
 
-    if (!email || !username || !password) {
-        alert('Please fill in all required fields');
+    if (!email || !username || !password || !wallet) {
+        alert('Please fill in all required fields (including wallet address)');
+        return;
+    }
+
+    // Basic Solana wallet validation (base58, 32-44 chars)
+    if (wallet.length < 32 || wallet.length > 44) {
+        alert('Invalid Solana wallet address. Please check and try again.');
         return;
     }
 
@@ -206,6 +213,7 @@ async function handleRegister() {
                 email,
                 username,
                 password,
+                payout_wallet: wallet,
                 referral_code: referralCode || null
             })
         });
@@ -614,8 +622,6 @@ function openCreateModal() {
     document.querySelectorAll('.side-btn').forEach(btn => btn.classList.remove('selected'));
     document.querySelectorAll('.amount-btn').forEach(btn => btn.classList.remove('selected'));
     document.getElementById('customAmount').value = '';
-    // Auto-fill payout wallet if user has one set
-    document.getElementById('creatorWallet').value = currentUser?.payout_wallet || '';
     document.getElementById('wagerSummary').style.display = 'none';
     document.getElementById('continueBtn').disabled = true;
 
@@ -687,20 +693,13 @@ function updateCreateSummary() {
 }
 
 async function continueToDeposit() {
-    const walletInput = document.getElementById('creatorWallet').value.trim();
-
-    if (!walletInput) {
-        alert('Please enter your Solana wallet address to receive winnings');
+    // Use payout wallet from logged-in user's account
+    if (!currentUser || !currentUser.payout_wallet) {
+        alert('You must be logged in with a payout wallet set to create wagers.\n\nPlease set your payout wallet in your profile.');
         return;
     }
 
-    // Basic Solana address validation
-    if (walletInput.length < 32 || walletInput.length > 44) {
-        alert('Please enter a valid Solana wallet address');
-        return;
-    }
-
-    createWagerState.creatorWallet = walletInput;
+    createWagerState.creatorWallet = currentUser.payout_wallet;
 
     // Show loading
     const continueBtn = document.getElementById('continueBtn');
@@ -839,10 +838,10 @@ function openAcceptModal(wagerId, amount, creatorSide) {
     const yourSide = creatorSide === 'heads' ? 'tails' : 'heads';
     const totalDeposit = amount;
 
-    // Auto-populate acceptor wallet from user's account
-    const acceptorWallet = currentUser.payout_wallet || currentUser.connected_wallet;
+    // Use payout wallet from user's account
+    const acceptorWallet = currentUser.payout_wallet;
     if (!acceptorWallet) {
-        alert('You must set a payout wallet in your profile before accepting wagers');
+        alert('You must set a payout wallet in your profile before accepting wagers.\n\nPlease update your profile with your Solana wallet address.');
         return;
     }
 

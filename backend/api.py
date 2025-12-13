@@ -191,6 +191,7 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     username: str
+    payout_wallet: str  # Required Solana wallet for winnings
     referral_code: Optional[str] = None  # Optional referrer code
 
 
@@ -434,6 +435,10 @@ async def register(request: RegisterRequest, http_request: Request):
     if not valid:
         raise HTTPException(status_code=400, detail=error)
 
+    # Validate Solana wallet address
+    if not request.payout_wallet or len(request.payout_wallet) < 32 or len(request.payout_wallet) > 44:
+        raise HTTPException(status_code=400, detail="Invalid Solana wallet address")
+
     # Handle referral code
     referred_by = None
     if request.referral_code:
@@ -455,6 +460,7 @@ async def register(request: RegisterRequest, http_request: Request):
         password_hash=hash_password(request.password),
         username=request.username.lower(),
         display_name=request.username,
+        payout_wallet=request.payout_wallet,  # Set payout wallet from registration
         referral_code=user_referral_code,
         referred_by=referred_by,
     )
