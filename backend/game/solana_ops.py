@@ -322,9 +322,10 @@ async def check_escrow_deposit(
         async with AsyncClient(rpc_url) as client:
             # First check balance
             balance = await get_sol_balance(rpc_url, escrow_address)
+            logger.info(f"[DEPOSIT_CHECK] Escrow {escrow_address[:8]}... balance: {balance} SOL (expecting {expected_amount} from {expected_sender[:8]}...)")
 
             if balance < expected_amount - tolerance:
-                logger.info(f"[DEPOSIT_CHECK] Escrow {escrow_address} balance {balance} < required {expected_amount}")
+                logger.info(f"[DEPOSIT_CHECK] Balance insufficient: {balance} < {expected_amount}")
                 return None
 
             # Balance is sufficient - now find the transaction from expected sender
@@ -340,6 +341,8 @@ async def check_escrow_deposit(
             if not sigs_resp.value:
                 logger.warning(f"[DEPOSIT_CHECK] No transactions found for {escrow_address}")
                 return None
+
+            logger.info(f"[DEPOSIT_CHECK] Found {len(sigs_resp.value)} transactions to check")
 
             # Check each transaction
             for sig_info in sigs_resp.value:
@@ -377,13 +380,17 @@ async def check_escrow_deposit(
                             lamports = info.get('lamports', 0)
                             actual_amount = lamports / LAMPORTS_PER_SOL
 
+                            logger.info(f"[DEPOSIT_CHECK] Found transfer: {actual_amount} SOL from {sender[:8]}... to {recipient[:8]}... (expecting from {expected_sender[:8]}... to {escrow_address[:8]}...)")
+
                             # Check if this matches our expected deposit
                             if (sender == expected_sender and
                                 recipient == escrow_address and
                                 abs(actual_amount - expected_amount) <= tolerance):
 
-                                logger.info(f"[DEPOSIT_CHECK] Found matching deposit: {actual_amount} SOL from {sender} (tx: {tx_sig})")
+                                logger.info(f"[DEPOSIT_CHECK] ✅ MATCH! Found deposit: {actual_amount} SOL from {sender} (tx: {tx_sig})")
                                 return tx_sig
+                            else:
+                                logger.info(f"[DEPOSIT_CHECK] No match: sender={sender==expected_sender}, recipient={recipient==escrow_address}, amount={abs(actual_amount - expected_amount) <= tolerance}")
 
             logger.info(f"[DEPOSIT_CHECK] Balance sufficient but no matching transaction from {expected_sender}")
             return None

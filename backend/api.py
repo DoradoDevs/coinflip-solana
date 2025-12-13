@@ -1260,6 +1260,8 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
             if not wager.acceptor_wallet:
                 return {"deposit_found": False, "message": "No acceptor wallet set"}
 
+            logger.info(f"[CHECK-DEPOSIT] Checking acceptor deposit for {wager_id}: escrow={wager.acceptor_escrow_address}, acceptor={wager.acceptor_wallet}, amount={wager.amount}")
+
             tx_sig = await check_escrow_deposit(
                 RPC_URL,
                 wager.acceptor_escrow_address,
@@ -1274,8 +1276,10 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
                     "transaction_signature": tx_sig,
                     "deposit_type": "acceptor"
                 }
+            else:
+                logger.info(f"[CHECK-DEPOSIT] Acceptor deposit NOT found for {wager_id}")
 
-        return {"deposit_found": False}
+        return {"deposit_found": False, "wager_status": wager.status, "has_acceptor_escrow": bool(wager.acceptor_escrow_address), "has_acceptor_wallet": bool(wager.acceptor_wallet)}
 
     except Exception as e:
         logger.error(f"Check deposit failed: {e}", exc_info=True)
