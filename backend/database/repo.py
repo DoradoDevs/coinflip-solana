@@ -570,14 +570,14 @@ class Database:
             INSERT OR REPLACE INTO wagers (
                 wager_id, creator_id, creator_wallet, creator_side, amount,
                 status, creator_escrow_address, creator_escrow_secret, creator_deposit_tx,
-                acceptor_id, acceptor_escrow_address, acceptor_escrow_secret, acceptor_deposit_tx,
+                acceptor_id, acceptor_wallet, acceptor_escrow_address, acceptor_escrow_secret, acceptor_deposit_tx,
                 game_id, created_at, expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             wager.wager_id, wager.creator_id, wager.creator_wallet,
             wager.creator_side.value, wager.amount, wager.status,
             wager.creator_escrow_address, wager.creator_escrow_secret, wager.creator_deposit_tx,
-            wager.acceptor_id,
+            wager.acceptor_id, wager.acceptor_wallet,
             wager.acceptor_escrow_address, wager.acceptor_escrow_secret, wager.acceptor_deposit_tx,
             wager.game_id,
             wager.created_at.isoformat(),
