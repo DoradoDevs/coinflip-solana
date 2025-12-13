@@ -1406,10 +1406,6 @@ function skipAnimation() {
 function showFinalResult() {
     console.log('🎬 SHOWING FINAL RESULT');
 
-    // Show modal step 3
-    document.getElementById('acceptStep2').style.display = 'none';
-    document.getElementById('acceptStep3').style.display = 'block';
-
     const resultContainer = document.getElementById('gameResultContent');
     const data = window.pendingGameResult;
 
@@ -1420,8 +1416,14 @@ function showFinalResult() {
 
     console.log('🎬 Result data:', data);
 
-    // Reset modal size
+    // Re-show the modal and switch to step 3 (result display)
     const modal = document.getElementById('acceptWagerModal');
+    modal.style.display = 'flex';  // Re-show the modal that was hidden
+    document.getElementById('acceptStep1').style.display = 'none';
+    document.getElementById('acceptStep2').style.display = 'none';
+    document.getElementById('acceptStep3').style.display = 'block';
+
+    // Reset modal size
     const modalContent = modal.querySelector('.modal-content');
     if (modalContent) {
         modalContent.style.maxWidth = '500px';
