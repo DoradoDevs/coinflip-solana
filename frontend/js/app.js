@@ -1233,7 +1233,14 @@ async function executeAcceptWager(txSignature) {
         // Remove loading overlay before showing animation
         loadingOverlay.remove();
 
+        // Hide modal (don't call closeAcceptModal which would trigger abandon)
+        document.getElementById('acceptWagerModal').style.display = 'none';
+
+        // Show result BEFORE clearing state (showGameResult needs the state data!)
+        showGameResult(result);
+
         // Clear accept state to prevent abandon-accept from being called
+        // (Do this AFTER showGameResult so it can access the state data)
         acceptWagerState = {
             wagerId: null,
             amount: null,
@@ -1243,12 +1250,6 @@ async function executeAcceptWager(txSignature) {
             escrowAddress: null,
             depositAmount: null
         };
-
-        // Hide modal (don't call closeAcceptModal which would trigger abandon)
-        document.getElementById('acceptWagerModal').style.display = 'none';
-
-        // Show result
-        showGameResult(result);
 
         // Refresh wagers list and user stats
         loadActiveWagers();
