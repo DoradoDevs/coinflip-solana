@@ -1199,9 +1199,13 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
         wager.acceptor_escrow_secret = encrypted_secret
         wager.acceptor_wallet = request.acceptor_wallet
         wager.accepting_at = datetime.utcnow()  # Track when accepting started
+
+        logger.info(f"[PREPARE-ACCEPT] BEFORE SAVE - Wager {wager_id}: acceptor_wallet={wager.acceptor_wallet}, escrow={escrow_address}")
         db.save_wager(wager)
 
-        logger.info(f"[PREPARE-ACCEPT] Wager {wager_id} - escrow {escrow_address} for acceptor {request.acceptor_wallet}")
+        # Verify it was saved
+        saved_wager = db.get_wager(wager_id)
+        logger.info(f"[PREPARE-ACCEPT] AFTER SAVE - Wager {wager_id}: acceptor_wallet={saved_wager.acceptor_wallet}, escrow={saved_wager.acceptor_escrow_address}")
 
         # Broadcast to all clients that someone is accepting this wager
         await manager.broadcast({
@@ -1265,7 +1269,10 @@ async def check_wager_deposit(wager_id: str, http_request: Request):
 
         elif wager.status == "open" and wager.acceptor_escrow_address:
             # Acceptor deposit check
+            logger.info(f"[CHECK-DEPOSIT] Wager {wager_id} state: status={wager.status}, has_acceptor_escrow={bool(wager.acceptor_escrow_address)}, acceptor_wallet={wager.acceptor_wallet}")
+
             if not wager.acceptor_wallet:
+                logger.error(f"[CHECK-DEPOSIT] ERROR: Wager {wager_id} has acceptor_escrow_address but NO acceptor_wallet!")
                 return {"deposit_found": False, "message": "No acceptor wallet set"}
 
             logger.info(f"[CHECK-DEPOSIT] Checking acceptor deposit for {wager_id}: escrow={wager.acceptor_escrow_address}, acceptor={wager.acceptor_wallet}, amount={wager.amount}")
