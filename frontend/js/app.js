@@ -838,20 +838,30 @@ function openAcceptModal(wagerId, amount, creatorSide) {
     const yourSide = creatorSide === 'heads' ? 'tails' : 'heads';
     const totalDeposit = amount + 0.025;
 
+    // Auto-populate acceptor wallet from user's account
+    const acceptorWallet = currentUser.payout_wallet || currentUser.connected_wallet;
+    if (!acceptorWallet) {
+        alert('You must set a payout wallet in your profile before accepting wagers');
+        return;
+    }
+
     // Set state
     acceptWagerState = {
         wagerId: wagerId,
         amount: amount,
         creatorSide: creatorSide,
         yourSide: yourSide,
-        acceptorWallet: null,
+        acceptorWallet: acceptorWallet,
         escrowAddress: null,
         depositAmount: totalDeposit
     };
 
     // Reset UI
-    document.getElementById('acceptorWallet').value = '';
     document.getElementById('acceptTxSignature').value = '';
+
+    // Display the wallet that will receive winnings
+    const walletDisplay = `${acceptorWallet.slice(0, 6)}...${acceptorWallet.slice(-6)}`;
+    document.getElementById('acceptorWalletDisplay').textContent = walletDisplay;
 
     // Update step 1 UI
     document.getElementById('acceptAmount').textContent = `${amount} SOL`;
@@ -930,19 +940,11 @@ async function cancelWager(wagerId) {
 }
 
 async function continueToAcceptDeposit() {
-    const walletInput = document.getElementById('acceptorWallet').value.trim();
-
-    if (!walletInput) {
-        alert('Please enter your Solana wallet address to receive winnings');
+    // Wallet is already set from acceptWager()
+    if (!acceptWagerState.acceptorWallet) {
+        alert('No payout wallet found. Please set one in your profile.');
         return;
     }
-
-    if (walletInput.length < 32 || walletInput.length > 44) {
-        alert('Please enter a valid Solana wallet address');
-        return;
-    }
-
-    acceptWagerState.acceptorWallet = walletInput;
 
     const continueBtn = document.getElementById('acceptContinueBtn');
     continueBtn.disabled = true;
