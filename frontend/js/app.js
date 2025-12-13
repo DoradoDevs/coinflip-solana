@@ -673,7 +673,7 @@ function updateCreateSummary() {
     const continueBtn = document.getElementById('continueBtn');
 
     if (createWagerState.selectedSide && createWagerState.selectedAmount) {
-        const totalDeposit = createWagerState.selectedAmount + 0.025;
+        const totalDeposit = createWagerState.selectedAmount;
 
         document.getElementById('summarySide').textContent = createWagerState.selectedSide.toUpperCase();
         document.getElementById('summaryAmount').textContent = `${createWagerState.selectedAmount} SOL`;
@@ -737,7 +737,7 @@ async function continueToDeposit() {
         const data = await response.json();
 
         createWagerState.escrowAddress = data.escrow_wallet;
-        createWagerState.depositAmount = createWagerState.selectedAmount + 0.025;
+        createWagerState.depositAmount = createWagerState.selectedAmount;
         createWagerState.wagerId = data.id;
 
         // Update step 2 UI
@@ -836,7 +836,7 @@ function openAcceptModal(wagerId, amount, creatorSide) {
     if (!requireLogin()) return;
 
     const yourSide = creatorSide === 'heads' ? 'tails' : 'heads';
-    const totalDeposit = amount + 0.025;
+    const totalDeposit = amount;
 
     // Auto-populate acceptor wallet from user's account
     const acceptorWallet = currentUser.payout_wallet || currentUser.connected_wallet;
@@ -910,7 +910,7 @@ async function cancelWager(wagerId) {
         return;
     }
 
-    if (!confirm('Are you sure you want to cancel this wager? Your wager amount will be refunded (minus the 0.025 SOL transaction fee).')) {
+    if (!confirm('Are you sure you want to cancel this wager? Your full wager amount will be refunded.')) {
         return;
     }
 

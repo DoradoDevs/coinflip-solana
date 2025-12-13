@@ -49,7 +49,7 @@ async def create_escrow_wallet(
         rpc_url: Solana RPC endpoint
         encryption_key: Encryption key for secrets
         amount: Wager amount in SOL
-        transaction_fee: Fixed transaction fee (0.025 SOL)
+        transaction_fee: DEPRECATED - no longer used, users only deposit wager amount
         user: User object (creator or acceptor)
         user_wallet: User's wallet address
         deposit_tx_signature: Transaction signature from Web user
@@ -62,7 +62,7 @@ async def create_escrow_wallet(
     Raises:
         Exception: If deposit verification fails or signature already used
     """
-    total_required = amount + transaction_fee
+    total_required = amount  # Users now only deposit the exact wager amount
 
     # Generate unique escrow wallet
     escrow_address, escrow_secret = generate_wallet()
@@ -148,7 +148,7 @@ async def verify_escrow_deposit(
         rpc_url: Solana RPC endpoint
         escrow_address: EXISTING escrow wallet address
         amount: Wager amount in SOL
-        transaction_fee: Fixed transaction fee (0.025 SOL)
+        transaction_fee: DEPRECATED - no longer used, users only deposit wager amount
         user_wallet: User's wallet address (sender)
         deposit_tx_signature: Transaction signature to verify
         wager_id: Wager ID for tracking
@@ -160,7 +160,7 @@ async def verify_escrow_deposit(
     Raises:
         Exception: If deposit verification fails or signature already used
     """
-    total_required = amount + transaction_fee
+    total_required = amount  # Users now only deposit the exact wager amount
 
     if not deposit_tx_signature:
         raise Exception(
@@ -187,7 +187,7 @@ async def verify_escrow_deposit(
     if not is_valid:
         raise Exception(
             f"Invalid deposit transaction. Please send exactly {total_required} SOL "
-            f"({amount} wager + {transaction_fee} fee) to escrow wallet {escrow_address}"
+            f"to escrow wallet {escrow_address}"
         )
 
     # SECURITY: Mark signature as used
@@ -324,9 +324,9 @@ async def refund_from_escrow(
     """Refund wager from escrow (cancel flow).
 
     Fee Structure on Cancel:
-    - Refund: wager_amount → creator's wallet
-    - Keep: transaction_fee → treasury wallet
-    - No 2% game fee (only on completed games)
+    - Refund: Full wager_amount → creator's wallet
+    - Keep: Only dust/leftover (minimal) → treasury wallet
+    - No 2% game fee (only charged on completed games)
 
     Args:
         rpc_url: Solana RPC endpoint
@@ -335,7 +335,7 @@ async def refund_from_escrow(
         creator_wallet: Creator's main wallet address
         fee_destination: Treasury wallet address for fee collection
         wager_amount: Wager amount to refund
-        transaction_fee: Transaction fee to keep (0.025 SOL)
+        transaction_fee: DEPRECATED - users now deposit exact wager amount
 
     Returns:
         Tuple of (refund_tx_signature, fee_tx_signature)

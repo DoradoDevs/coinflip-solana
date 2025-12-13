@@ -1545,10 +1545,9 @@ async def cancel_wager_endpoint(request: CancelWagerRequest):
 
         return {
             "success": True,
-            "message": f"Wager cancelled. Refunded {wager.amount} SOL, kept {TRANSACTION_FEE} SOL fee",
+            "message": f"Wager cancelled. Refunded full {wager.amount} SOL",
             "wager_id": request.wager_id,
             "refund_amount": wager.amount,
-            "fee_kept": TRANSACTION_FEE,
             "refund_tx": refund_tx,
             "fee_tx": fee_tx
         }

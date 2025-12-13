@@ -421,11 +421,11 @@ async def play_pvp_game_with_escrows(
         payout_per_escrow = amount * (1 - winner_fee_rate)  # (100% - fee%) from each escrow
         total_payout = payout_per_escrow * 2  # Winner gets from both escrows
         fee_per_escrow = amount * winner_fee_rate  # Fee from each escrow
-        total_fees = fee_per_escrow * 2 + (TRANSACTION_FEE * 2)  # Fees + tx costs
+        total_fees = fee_per_escrow * 2  # 2% fee from total pot (covers Solana tx fees + profit)
 
         logger.info(f"[ESCROW GAME] Winner tier: {winner.tier} (effective fee rate: {winner_fee_rate*100:.2f}%)")
         logger.info(f"[ESCROW GAME] Total payout to winner: {total_payout:.6f} SOL ({payout_per_escrow:.6f} from each escrow)")
-        logger.info(f"[ESCROW GAME] Total fees to treasury: {total_fees:.6f} SOL ({fee_per_escrow:.6f} + {TRANSACTION_FEE} from each escrow)")
+        logger.info(f"[ESCROW GAME] Total fees to treasury: {total_fees:.6f} SOL ({fee_per_escrow:.6f} from each escrow)")
 
         # STEP 4: PAY WINNER FROM BOTH ESCROWS
         # Send 98% of bet from winner's own escrow
