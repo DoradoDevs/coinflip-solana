@@ -2126,15 +2126,19 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
             })
 
     # === REFUND ACCEPTOR ESCROW ===
+    logger.info(f"[REFUND] Checking acceptor escrow: has_address={bool(wager.acceptor_escrow_address)}, has_secret={bool(wager.acceptor_escrow_secret)}, address={wager.acceptor_escrow_address}")
     if wager.acceptor_escrow_address and wager.acceptor_escrow_secret:
         try:
             # Get acceptor's payout wallet (preferred) or fall back to acceptor_wallet
+            logger.info(f"[REFUND] acceptor_wallet={wager.acceptor_wallet}, acceptor_id={wager.acceptor_id}")
             acceptor_destination = wager.acceptor_wallet  # default fallback
             if wager.acceptor_id:
                 acceptor = db.get_user(wager.acceptor_id)
                 if acceptor and acceptor.payout_wallet:
                     acceptor_destination = acceptor.payout_wallet
                     logger.info(f"[REFUND] Using acceptor's payout wallet: {acceptor_destination}")
+                else:
+                    logger.info(f"[REFUND] Acceptor user found but no payout wallet: {acceptor}")
 
             if not acceptor_destination:
                 logger.warning(f"[REFUND] No acceptor wallet found, cannot refund acceptor escrow")
@@ -2193,7 +2197,8 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
         wager.status = "refunded"
         db.save_wager(wager)
 
-    logger.info(f"Admin {admin.email} refunded wager {wager_id}: {total_refunded:.6f} SOL total")
+    logger.info(f"[REFUND] Admin {admin.email} refunded wager {wager_id}: {total_refunded:.6f} SOL total")
+    logger.info(f"[REFUND] Results: {refund_results}")
 
     return {
         "success": True,

@@ -1032,25 +1032,25 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    if (data.total_refunded > 0) {
-                        // Build detailed message showing all refunds
-                        let message = `Refund successful!\n\nTotal: ${data.total_refunded.toFixed(6)} SOL\n\n`;
+                    // Build detailed message showing all refunds
+                    let message = `Refund complete!\n\nTotal: ${data.total_refunded.toFixed(6)} SOL\n\n`;
 
+                    if (data.refunds && data.refunds.length > 0) {
                         data.refunds.forEach(refund => {
                             const type = refund.escrow_type.toUpperCase();
                             if (refund.error) {
-                                message += `${type}: ERROR - ${refund.error}\n`;
+                                message += `${type} ESCROW: ERROR\n${refund.error}\n\n`;
                             } else if (refund.message) {
-                                message += `${type}: ${refund.message}\n`;
+                                message += `${type} ESCROW: ${refund.message}\n\n`;
                             } else if (refund.amount > 0) {
-                                message += `${type}: ${refund.amount.toFixed(6)} SOL to ${refund.destination.slice(0,6)}...${refund.destination.slice(-6)}\nTX: ${refund.tx_signature}\nSolscan: ${refund.solscan_url}\n\n`;
+                                message += `${type} ESCROW: ${refund.amount.toFixed(6)} SOL\nTo: ${refund.destination.slice(0,6)}...${refund.destination.slice(-6)}\nTX: ${refund.tx_signature}\nSolscan: ${refund.solscan_url}\n\n`;
+                            } else {
+                                message += `${type} ESCROW: 0 SOL (no action taken)\n\n`;
                             }
                         });
-
-                        alert(message);
-                    } else {
-                        alert(`Wager marked as refunded.\n\n${data.message}`);
                     }
+
+                    alert(message);
                     loadWagers();
                 } else {
                     throw new Error(data.detail || 'Refund failed');
