@@ -119,6 +119,7 @@ class Database:
                 creator_escrow_secret TEXT,
                 creator_deposit_tx TEXT,
                 acceptor_id INTEGER,
+                acceptor_wallet TEXT,
                 acceptor_escrow_address TEXT,
                 acceptor_escrow_secret TEXT,
                 acceptor_deposit_tx TEXT,
@@ -192,6 +193,24 @@ class Database:
                 try:
                     cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
                     logger.info(f"Migration: Added column '{col_name}' to users table")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        logger.warning(f"Migration warning for {col_name}: {e}")
+
+        # Get existing columns in wagers table
+        cursor.execute("PRAGMA table_info(wagers)")
+        existing_wager_columns = {row[1] for row in cursor.fetchall()}
+
+        # Add missing columns to wagers table (for existing databases)
+        wager_migrations = [
+            ("acceptor_wallet", "TEXT"),
+        ]
+
+        for col_name, col_type in wager_migrations:
+            if col_name not in existing_wager_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE wagers ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Migration: Added column '{col_name}' to wagers table")
                 except sqlite3.OperationalError as e:
                     if "duplicate column" not in str(e).lower():
                         logger.warning(f"Migration warning for {col_name}: {e}")
