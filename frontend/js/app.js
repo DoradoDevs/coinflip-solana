@@ -1017,6 +1017,37 @@ async function verifyAcceptDeposit() {
     verifyBtn.disabled = true;
     verifyBtn.textContent = 'Verifying & Flipping...';
 
+    // Show immediate loading overlay to reduce perceived delay
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'verifyingOverlay';
+    loadingOverlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.95); z-index: 999998;
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; padding: 20px;
+    `;
+    loadingOverlay.innerHTML = `
+        <div style="text-align: center;">
+            <div class="spinner" style="
+                border: 4px solid rgba(255, 215, 0, 0.3);
+                border-top: 4px solid #FFD700;
+                border-radius: 50%;
+                width: 60px; height: 60px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+            "></div>
+            <h2 style="color: #FFD700; font-size: 1.8rem; margin: 10px 0;">Verifying Deposit...</h2>
+            <p style="color: #aaa; font-size: 1.1rem;">Executing coinflip on-chain</p>
+        </div>
+        <style>
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    `;
+    document.body.appendChild(loadingOverlay);
+
     try {
         // Accept wager and execute coinflip
         const headers = { 'Content-Type': 'application/json' };
@@ -1036,10 +1067,14 @@ async function verifyAcceptDeposit() {
 
         if (!response.ok) {
             const error = await response.json();
+            loadingOverlay.remove();
             throw new Error(error.detail || 'Failed to execute coinflip');
         }
 
         const result = await response.json();
+
+        // Remove loading overlay before showing animation
+        loadingOverlay.remove();
 
         // Show result
         showGameResult(result);
@@ -1050,6 +1085,7 @@ async function verifyAcceptDeposit() {
 
     } catch (err) {
         console.error('Error accepting wager:', err);
+        loadingOverlay.remove();
         alert(err.message || 'Failed to execute coinflip. Please try again.');
     } finally {
         verifyBtn.disabled = false;
