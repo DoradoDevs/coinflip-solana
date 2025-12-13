@@ -1184,8 +1184,8 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
         escrow_address, escrow_secret = generate_wallet()
         encrypted_secret = encrypt_secret(escrow_secret, ENCRYPTION_KEY)
 
-        # Calculate deposit amount (wager + fee buffer)
-        deposit_amount = wager.amount + TRANSACTION_FEE
+        # Calculate deposit amount (no more extra fee!)
+        deposit_amount = wager.amount
 
         # Store the pending accept info temporarily on the wager
         # This will be finalized when they call the accept endpoint
@@ -1217,6 +1217,69 @@ async def prepare_accept_wager(wager_id: str, request: PrepareAcceptRequest, htt
     except Exception as e:
         logger.error(f"Prepare accept failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to prepare accept. Please try again.")
+
+
+@app.get("/api/wager/{wager_id}/check-deposit")
+async def check_wager_deposit(wager_id: str, http_request: Request):
+    """Check if deposit has been received for this wager.
+
+    Monitors the escrow wallet balance and recent transactions to detect deposits.
+    Returns transaction signature if deposit found, null otherwise.
+    """
+    try:
+        from game.solana_ops import check_escrow_deposit
+
+        # Get the wager
+        wager = db.get_wager(wager_id)
+        if not wager:
+            raise HTTPException(status_code=404, detail="Wager not found")
+
+        # Check which escrow to monitor based on wager status
+        if wager.status == "pending_deposit":
+            # Creator deposit check
+            if not wager.creator_escrow_address:
+                return {"deposit_found": False, "message": "No escrow wallet yet"}
+
+            tx_sig = await check_escrow_deposit(
+                RPC_URL,
+                wager.creator_escrow_address,
+                wager.creator_wallet,
+                wager.amount
+            )
+
+            if tx_sig:
+                logger.info(f"[CHECK-DEPOSIT] Creator deposit found for {wager_id}: {tx_sig}")
+                return {
+                    "deposit_found": True,
+                    "transaction_signature": tx_sig,
+                    "deposit_type": "creator"
+                }
+
+        elif wager.status == "open" and wager.acceptor_escrow_address:
+            # Acceptor deposit check
+            if not wager.acceptor_wallet:
+                return {"deposit_found": False, "message": "No acceptor wallet set"}
+
+            tx_sig = await check_escrow_deposit(
+                RPC_URL,
+                wager.acceptor_escrow_address,
+                wager.acceptor_wallet,
+                wager.amount
+            )
+
+            if tx_sig:
+                logger.info(f"[CHECK-DEPOSIT] Acceptor deposit found for {wager_id}: {tx_sig}")
+                return {
+                    "deposit_found": True,
+                    "transaction_signature": tx_sig,
+                    "deposit_type": "acceptor"
+                }
+
+        return {"deposit_found": False}
+
+    except Exception as e:
+        logger.error(f"Check deposit failed: {e}", exc_info=True)
+        return {"deposit_found": False, "error": str(e)}
 
 
 class AbandonAcceptRequest(BaseModel):

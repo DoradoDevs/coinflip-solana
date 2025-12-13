@@ -297,6 +297,102 @@ async def verify_deposit_transaction(
         return False
 
 
+async def check_escrow_deposit(
+    rpc_url: str,
+    escrow_address: str,
+    expected_sender: str,
+    expected_amount: float,
+    tolerance: float = 0.001
+) -> Optional[str]:
+    """Check if escrow has received a deposit from expected sender.
+
+    Monitors escrow balance and recent transactions to find a matching deposit.
+
+    Args:
+        rpc_url: Solana RPC URL
+        escrow_address: Escrow wallet to monitor
+        expected_sender: Wallet that should send the deposit
+        expected_amount: Expected deposit amount in SOL
+        tolerance: Amount tolerance (default 0.001 SOL)
+
+    Returns:
+        Transaction signature if deposit found, None otherwise
+    """
+    try:
+        async with AsyncClient(rpc_url) as client:
+            # First check balance
+            balance = await get_sol_balance(rpc_url, escrow_address)
+
+            if balance < expected_amount - tolerance:
+                logger.info(f"[DEPOSIT_CHECK] Escrow {escrow_address} balance {balance} < required {expected_amount}")
+                return None
+
+            # Balance is sufficient - now find the transaction from expected sender
+            escrow_pubkey = Pubkey.from_string(escrow_address)
+
+            # Get recent signatures (last 10 transactions)
+            sigs_resp = await client.get_signatures_for_address(
+                escrow_pubkey,
+                limit=10,
+                commitment=Confirmed
+            )
+
+            if not sigs_resp.value:
+                logger.warning(f"[DEPOSIT_CHECK] No transactions found for {escrow_address}")
+                return None
+
+            # Check each transaction
+            for sig_info in sigs_resp.value:
+                tx_sig = str(sig_info.signature)
+
+                # Get transaction details
+                tx_resp = await client.get_transaction(
+                    sig_info.signature,
+                    encoding="jsonParsed",
+                    commitment=Confirmed,
+                    max_supported_transaction_version=0
+                )
+
+                if not tx_resp.value:
+                    continue
+
+                tx = tx_resp.value
+
+                # Skip failed transactions
+                if tx.transaction.meta.err is not None:
+                    continue
+
+                # Look for transfer instruction
+                instructions = tx.transaction.transaction.message.instructions
+
+                for ix in instructions:
+                    if hasattr(ix, 'parsed') and ix.parsed:
+                        parsed = ix.parsed
+
+                        if parsed.get('type') == 'transfer':
+                            info = parsed.get('info', {})
+
+                            sender = info.get('source')
+                            recipient = info.get('destination')
+                            lamports = info.get('lamports', 0)
+                            actual_amount = lamports / LAMPORTS_PER_SOL
+
+                            # Check if this matches our expected deposit
+                            if (sender == expected_sender and
+                                recipient == escrow_address and
+                                abs(actual_amount - expected_amount) <= tolerance):
+
+                                logger.info(f"[DEPOSIT_CHECK] Found matching deposit: {actual_amount} SOL from {sender} (tx: {tx_sig})")
+                                return tx_sig
+
+            logger.info(f"[DEPOSIT_CHECK] Balance sufficient but no matching transaction from {expected_sender}")
+            return None
+
+    except Exception as e:
+        logger.error(f"[DEPOSIT_CHECK] Error checking deposit: {e}")
+        return None
+
+
 async def verify_deposit_to_escrow(
     rpc_url: str,
     transaction_signature: str,

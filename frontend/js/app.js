@@ -977,6 +977,9 @@ async function continueToAcceptDeposit() {
         document.getElementById('acceptStep1').style.display = 'none';
         document.getElementById('acceptStep2').style.display = 'block';
 
+        // Start monitoring for deposit
+        startDepositMonitoring(acceptWagerState.wagerId, 'acceptor');
+
     } catch (err) {
         console.error('Error preparing accept:', err);
         alert(err.message || 'Failed to prepare. Please try again.');
@@ -986,74 +989,106 @@ async function continueToAcceptDeposit() {
     }
 }
 
-function backToAcceptStep1() {
-    document.getElementById('acceptStep1').style.display = 'block';
-    document.getElementById('acceptStep2').style.display = 'none';
-}
+let depositMonitoringInterval = null;
 
-function copyAcceptEscrowAddress() {
-    const address = document.getElementById('acceptEscrowAddress').textContent;
-    navigator.clipboard.writeText(address).then(() => {
-        const btn = document.querySelector('#acceptStep2 .copy-btn');
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy', 2000);
-    });
-}
-
-async function verifyAcceptDeposit() {
-    const txSignature = document.getElementById('acceptTxSignature').value.trim();
-
-    if (!txSignature) {
-        alert('Please enter your transaction signature');
-        return;
+function startDepositMonitoring(wagerId, depositType) {
+    // Clear any existing interval
+    if (depositMonitoringInterval) {
+        clearInterval(depositMonitoringInterval);
     }
 
-    if (txSignature.length < 80 || txSignature.length > 100) {
-        alert('Please enter a valid transaction signature');
-        return;
-    }
+    let attempts = 0;
+    const maxAttempts = 150; // 5 minutes (150 * 2 seconds)
 
-    const verifyBtn = document.getElementById('verifyAcceptBtn');
-    verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verifying & Flipping...';
+    const checkDeposit = async () => {
+        attempts++;
 
-    // Show immediate loading overlay to reduce perceived delay
-    const loadingOverlay = document.createElement('div');
-    loadingOverlay.id = 'verifyingOverlay';
-    loadingOverlay.style.cssText = `
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: rgba(0, 0, 0, 0.95); z-index: 999998;
-        display: flex; flex-direction: column; align-items: center;
-        justify-content: center; padding: 20px;
-    `;
-    loadingOverlay.innerHTML = `
-        <div style="text-align: center;">
-            <div class="spinner" style="
-                border: 4px solid rgba(255, 215, 0, 0.3);
-                border-top: 4px solid #FFD700;
-                border-radius: 50%;
-                width: 60px; height: 60px;
-                animation: spin 1s linear infinite;
-                margin: 0 auto 20px;
-            "></div>
-            <h2 style="color: #FFD700; font-size: 1.8rem; margin: 10px 0;">Verifying Deposit...</h2>
-            <p style="color: #aaa; font-size: 1.1rem;">Executing coinflip on-chain</p>
-        </div>
-        <style>
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
+        try {
+            const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
+            const data = await response.json();
+
+            if (data.deposit_found && data.transaction_signature) {
+                // Deposit found!
+                clearInterval(depositMonitoringInterval);
+                depositMonitoringInterval = null;
+
+                console.log('✅ Deposit detected:', data.transaction_signature);
+
+                // Update status
+                document.getElementById('depositStatusText').textContent = 'Deposit received! Executing coinflip...';
+
+                // Execute the wager acceptance
+                await executeAcceptWager(data.transaction_signature);
+
+            } else if (attempts >= maxAttempts) {
+                // Timeout
+                clearInterval(depositMonitoringInterval);
+                depositMonitoringInterval = null;
+
+                document.getElementById('depositStatusText').textContent = 'Timeout waiting for deposit';
+                alert('Deposit not detected within 5 minutes. Please try again or contact support.');
+
+            } else {
+                // Still waiting
+                const elapsed = Math.floor(attempts * 2);
+                document.getElementById('depositStatusText').textContent =
+                    `Monitoring escrow wallet (${elapsed}s elapsed)...`;
             }
-        </style>
-    `;
-    document.body.appendChild(loadingOverlay);
 
+        } catch (err) {
+            console.error('Error checking deposit:', err);
+        }
+    };
+
+    // Check immediately
+    checkDeposit();
+
+    // Then check every 2 seconds
+    depositMonitoringInterval = setInterval(checkDeposit, 2000);
+}
+
+function cancelAcceptDeposit() {
+    // Stop monitoring
+    if (depositMonitoringInterval) {
+        clearInterval(depositMonitoringInterval);
+        depositMonitoringInterval = null;
+    }
+
+    // Close modal
+    closeAcceptModal();
+}
+
+async function executeAcceptWager(txSignature) {
     try {
-        // Accept wager and execute coinflip
         const headers = { 'Content-Type': 'application/json' };
         if (sessionToken) {
             headers['Authorization'] = `Bearer ${sessionToken}`;
         }
+
+        // Show loading overlay
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.id = 'verifyingOverlay';
+        loadingOverlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.95); z-index: 999998;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; padding: 20px;
+        `;
+        loadingOverlay.innerHTML = `
+            <div style="text-align: center;">
+                <div class="spinner" style="
+                    border: 4px solid rgba(255, 215, 0, 0.3);
+                    border-top: 4px solid #FFD700;
+                    border-radius: 50%;
+                    width: 60px; height: 60px;
+                    animation: spin 1s linear infinite;
+                    margin: 0 auto 20px;
+                "></div>
+                <h2 style="color: #FFD700; font-size: 1.8rem; margin: 10px 0;">Executing Coinflip...</h2>
+                <p style="color: #aaa; font-size: 1.1rem;">Verifying on-chain & flipping coin</p>
+            </div>
+        `;
+        document.body.appendChild(loadingOverlay);
 
         const response = await fetch(`${API_BASE}/api/wager/${acceptWagerState.wagerId}/accept`, {
             method: 'POST',
@@ -1081,17 +1116,30 @@ async function verifyAcceptDeposit() {
 
         // Refresh wagers list and user stats
         loadActiveWagers();
-        await checkSession(); // Refresh user stats (tier progress, volume, etc.)
+        await checkSession();
 
     } catch (err) {
-        console.error('Error accepting wager:', err);
-        loadingOverlay.remove();
-        alert(err.message || 'Failed to execute coinflip. Please try again.');
-    } finally {
-        verifyBtn.disabled = false;
-        verifyBtn.textContent = 'Verify & Execute Coinflip';
+        console.error('Error executing wager:', err);
+        alert(err.message || 'Failed to execute coinflip. Please contact support.');
     }
 }
+
+function backToAcceptStep1() {
+    document.getElementById('acceptStep1').style.display = 'block';
+    document.getElementById('acceptStep2').style.display = 'none';
+}
+
+function copyAcceptEscrowAddress() {
+    const address = document.getElementById('acceptEscrowAddress').textContent;
+    navigator.clipboard.writeText(address).then(() => {
+        const btn = document.querySelector('#acceptStep2 .copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+}
+
+// OLD FUNCTION - REPLACED BY AUTO DEPOSIT MONITORING
+// Kept for reference, can be deleted in next cleanup
 
 function showGameResult(result) {
     const isWinner = result.winner_wallet === acceptWagerState.acceptorWallet;
