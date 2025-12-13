@@ -1149,6 +1149,8 @@ async function activateWager(wagerId, txSignature) {
 
         const result = await response.json();
 
+        console.log('✅ Wager activated successfully:', result);
+
         // Show success screen
         document.getElementById('newWagerId').textContent = result.wager_id;
         document.getElementById('newWagerAmount').textContent = `${createWagerState.selectedAmount} SOL`;
@@ -1161,7 +1163,8 @@ async function activateWager(wagerId, txSignature) {
         loadActiveWagers();
 
     } catch (err) {
-        console.error('Error activating wager:', err);
+        console.error('❌ Error activating wager:', err);
+        console.error('Error details:', err.message, err.stack);
         alert(err.message || 'Failed to activate wager. Please contact support.');
     }
 }
@@ -1216,8 +1219,13 @@ async function executeAcceptWager(txSignature) {
 
         const result = await response.json();
 
+        console.log('✅ Wager accepted successfully:', result);
+
         // Remove loading overlay before showing animation
         loadingOverlay.remove();
+
+        // Close the accept modal
+        closeAcceptModal();
 
         // Show result
         showGameResult(result);
@@ -1227,8 +1235,13 @@ async function executeAcceptWager(txSignature) {
         await checkSession();
 
     } catch (err) {
-        console.error('Error executing wager:', err);
+        console.error('❌ Error executing wager:', err);
+        console.error('Error details:', err.message, err.stack);
         alert(err.message || 'Failed to execute coinflip. Please contact support.');
+
+        // Remove loading overlay if it exists
+        const overlay = document.getElementById('verifyingOverlay');
+        if (overlay) overlay.remove();
     }
 }
 
