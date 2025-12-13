@@ -1035,8 +1035,8 @@ async def verify_wager_deposit(wager_id: str, request: VerifyDepositRequest, htt
                 detail=f"Transaction signature already used for {used_sig.used_for}"
             )
 
-        # Calculate expected amount
-        total_required = wager.amount + TRANSACTION_FEE
+        # Calculate expected amount (no more extra fee!)
+        total_required = wager.amount
 
         logger.info(f"[VERIFY] Checking deposit for wager {wager_id}")
         logger.info(f"[VERIFY] Expected: {total_required} SOL to {wager.creator_escrow_address}")

@@ -742,12 +742,14 @@ async function continueToDeposit() {
 
         // Update step 2 UI
         document.getElementById('depositAmount').textContent = createWagerState.depositAmount.toFixed(3);
-        document.getElementById('depositAmount2').textContent = createWagerState.depositAmount.toFixed(3);
         document.getElementById('escrowAddress').textContent = createWagerState.escrowAddress;
 
         // Show step 2
         document.getElementById('step1').style.display = 'none';
         document.getElementById('step2').style.display = 'block';
+
+        // Start monitoring for deposit
+        startCreateDepositMonitoring(createWagerState.wagerId);
 
     } catch (err) {
         console.error('Error creating wager:', err);
@@ -1056,6 +1058,107 @@ function cancelAcceptDeposit() {
 
     // Close modal
     closeAcceptModal();
+}
+
+function startCreateDepositMonitoring(wagerId) {
+    // Clear any existing interval
+    if (depositMonitoringInterval) {
+        clearInterval(depositMonitoringInterval);
+    }
+
+    let attempts = 0;
+    const maxAttempts = 150; // 5 minutes (150 * 2 seconds)
+
+    const checkDeposit = async () => {
+        attempts++;
+
+        try {
+            const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
+            const data = await response.json();
+
+            if (data.deposit_found && data.transaction_signature) {
+                // Deposit found!
+                clearInterval(depositMonitoringInterval);
+                depositMonitoringInterval = null;
+
+                console.log('✅ Deposit detected:', data.transaction_signature);
+
+                // Update status
+                document.getElementById('createDepositStatusText').textContent = 'Deposit received! Activating wager...';
+
+                // Activate the wager
+                await activateWager(wagerId, data.transaction_signature);
+
+            } else if (attempts >= maxAttempts) {
+                // Timeout
+                clearInterval(depositMonitoringInterval);
+                depositMonitoringInterval = null;
+
+                document.getElementById('createDepositStatusText').textContent = 'Timeout waiting for deposit';
+                alert('Deposit not detected within 5 minutes. Please try again or contact support.');
+
+            } else {
+                // Still waiting
+                const elapsed = Math.floor(attempts * 2);
+                document.getElementById('createDepositStatusText').textContent =
+                    `Monitoring escrow wallet (${elapsed}s elapsed)...`;
+            }
+
+        } catch (err) {
+            console.error('Error checking deposit:', err);
+        }
+    };
+
+    // Check immediately
+    checkDeposit();
+
+    // Then check every 2 seconds
+    depositMonitoringInterval = setInterval(checkDeposit, 2000);
+}
+
+function cancelCreateDeposit() {
+    // Stop monitoring
+    if (depositMonitoringInterval) {
+        clearInterval(depositMonitoringInterval);
+        depositMonitoringInterval = null;
+    }
+
+    // Close modal
+    closeCreateModal();
+}
+
+async function activateWager(wagerId, txSignature) {
+    try {
+        const response = await fetch(`${API_BASE}/api/wager/${wagerId}/verify-deposit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tx_signature: txSignature
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to activate wager');
+        }
+
+        const result = await response.json();
+
+        // Show success screen
+        document.getElementById('newWagerId').textContent = result.wager_id;
+        document.getElementById('newWagerAmount').textContent = `${createWagerState.selectedAmount} SOL`;
+        document.getElementById('newWagerSide').textContent = createWagerState.selectedSide.toUpperCase();
+
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('step3').style.display = 'block';
+
+        // Refresh wagers list
+        loadActiveWagers();
+
+    } catch (err) {
+        console.error('Error activating wager:', err);
+        alert(err.message || 'Failed to activate wager. Please contact support.');
+    }
 }
 
 async function executeAcceptWager(txSignature) {
