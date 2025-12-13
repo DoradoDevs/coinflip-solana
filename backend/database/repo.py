@@ -683,6 +683,7 @@ class Database:
 
     def _row_to_wager(self, row: sqlite3.Row) -> Wager:
         """Convert database row to Wager object."""
+        keys = row.keys()
         return Wager(
             wager_id=row["wager_id"],
             creator_id=row["creator_id"],
@@ -694,6 +695,7 @@ class Database:
             creator_escrow_secret=row["creator_escrow_secret"],
             creator_deposit_tx=row["creator_deposit_tx"],
             acceptor_id=row["acceptor_id"],
+            acceptor_wallet=row["acceptor_wallet"] if "acceptor_wallet" in keys else None,
             acceptor_escrow_address=row["acceptor_escrow_address"],
             acceptor_escrow_secret=row["acceptor_escrow_secret"],
             acceptor_deposit_tx=row["acceptor_deposit_tx"],
