@@ -1004,6 +1004,9 @@ function startDepositMonitoring(wagerId, depositType) {
             const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
             const data = await response.json();
 
+            // Log EVERY response to see what's happening
+            console.log(`[Attempt ${attempts}] Check deposit response:`, data);
+
             // Log debug info if available
             if (data.debug) {
                 console.log('🔍 Deposit check debug:', data.debug);
@@ -1075,6 +1078,9 @@ function startCreateDepositMonitoring(wagerId) {
         try {
             const response = await fetch(`${API_BASE}/api/wager/${wagerId}/check-deposit`);
             const data = await response.json();
+
+            // Log EVERY response to see what's happening
+            console.log(`[Attempt ${attempts}] Check deposit response:`, data);
 
             // Log debug info if available
             if (data.debug) {
