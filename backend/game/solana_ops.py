@@ -400,6 +400,75 @@ async def check_escrow_deposit(
         return None
 
 
+async def get_escrow_sender(rpc_url: str, escrow_address: str) -> Optional[str]:
+    """Find the wallet that sent SOL to this escrow by checking transaction history.
+
+    Args:
+        rpc_url: Solana RPC URL
+        escrow_address: Escrow wallet address to check
+
+    Returns:
+        Sender wallet address if found, None otherwise
+    """
+    try:
+        async with AsyncClient(rpc_url) as client:
+            escrow_pubkey = Pubkey.from_string(escrow_address)
+
+            # Get recent signatures
+            sigs_resp = await client.get_signatures_for_address(
+                escrow_pubkey,
+                limit=10,
+                commitment=Confirmed
+            )
+
+            if not sigs_resp.value:
+                logger.warning(f"[GET_SENDER] No transactions found for {escrow_address}")
+                return None
+
+            # Check each transaction to find a transfer TO this escrow
+            for sig_info in sigs_resp.value:
+                # Get transaction details
+                tx_resp = await client.get_transaction(
+                    sig_info.signature,
+                    encoding="jsonParsed",
+                    commitment=Confirmed,
+                    max_supported_transaction_version=0
+                )
+
+                if not tx_resp.value:
+                    continue
+
+                tx = tx_resp.value
+
+                # Skip failed transactions
+                if tx.transaction.meta.err is not None:
+                    continue
+
+                # Look for transfer instruction TO the escrow
+                instructions = tx.transaction.transaction.message.instructions
+
+                for ix in instructions:
+                    if hasattr(ix, 'parsed') and ix.parsed:
+                        parsed = ix.parsed
+
+                        if parsed.get('type') == 'transfer':
+                            info = parsed.get('info', {})
+                            sender = info.get('source')
+                            recipient = info.get('destination')
+
+                            # Found a transfer TO this escrow
+                            if recipient == escrow_address:
+                                logger.info(f"[GET_SENDER] Found sender {sender} for escrow {escrow_address}")
+                                return sender
+
+            logger.warning(f"[GET_SENDER] No transfer found to escrow {escrow_address}")
+            return None
+
+    except Exception as e:
+        logger.error(f"[GET_SENDER] Error finding sender: {e}")
+        return None
+
+
 async def verify_deposit_to_escrow(
     rpc_url: str,
     transaction_signature: str,

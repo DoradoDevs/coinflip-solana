@@ -2141,12 +2141,21 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
                     logger.info(f"[REFUND] Acceptor user found but no payout wallet: {acceptor}")
 
             if not acceptor_destination:
-                logger.warning(f"[REFUND] No acceptor wallet found, cannot refund acceptor escrow")
-                refund_results.append({
-                    "escrow_type": "acceptor",
-                    "error": "No acceptor wallet address available"
-                })
-            else:
+                # Try to find the sender from blockchain transaction history
+                logger.warning(f"[REFUND] No acceptor wallet saved, checking blockchain for sender...")
+                from game.solana_ops import get_escrow_sender
+                acceptor_destination = await get_escrow_sender(RPC_URL, wager.acceptor_escrow_address)
+
+                if acceptor_destination:
+                    logger.info(f"[REFUND] Found acceptor from blockchain: {acceptor_destination}")
+                else:
+                    logger.error(f"[REFUND] Could not find acceptor wallet from blockchain")
+                    refund_results.append({
+                        "escrow_type": "acceptor",
+                        "error": "No acceptor wallet address available (not in DB, not found on blockchain)"
+                    })
+
+            if acceptor_destination:
                 # Check acceptor escrow balance
                 acceptor_balance = await get_sol_balance(RPC_URL, wager.acceptor_escrow_address)
                 logger.info(f"[REFUND] Acceptor escrow {wager.acceptor_escrow_address} balance: {acceptor_balance} SOL")
