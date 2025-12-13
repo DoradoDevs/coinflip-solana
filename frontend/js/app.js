@@ -1230,8 +1230,19 @@ async function executeAcceptWager(txSignature) {
         // Remove loading overlay before showing animation
         loadingOverlay.remove();
 
-        // Close the accept modal
-        closeAcceptModal();
+        // Clear accept state to prevent abandon-accept from being called
+        acceptWagerState = {
+            wagerId: null,
+            amount: null,
+            creatorSide: null,
+            yourSide: null,
+            acceptorWallet: null,
+            escrowAddress: null,
+            depositAmount: null
+        };
+
+        // Hide modal (don't call closeAcceptModal which would trigger abandon)
+        document.getElementById('acceptWagerModal').style.display = 'none';
 
         // Show result
         showGameResult(result);
