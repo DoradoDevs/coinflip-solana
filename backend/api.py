@@ -1335,6 +1335,14 @@ async def abandon_accept_wager(wager_id: str, request: AbandonAcceptRequest):
         if wager.acceptor_wallet != request.acceptor_wallet:
             raise HTTPException(status_code=403, detail="Not authorized to abandon this acceptance")
 
+        # Check if there's already a deposit - if so, DON'T abandon!
+        if wager.acceptor_escrow_address:
+            from game.solana_ops import get_sol_balance
+            balance = await get_sol_balance(RPC_URL, wager.acceptor_escrow_address)
+            if balance >= 0.001:
+                logger.warning(f"[ABANDON-ACCEPT] NOT abandoning wager {wager_id} - escrow already has {balance} SOL!")
+                return {"success": False, "message": "Cannot abandon - deposit already made"}
+
         # Clear accepting state
         wager.accepting_at = None
         wager.acceptor_wallet = None
