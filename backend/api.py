@@ -2222,10 +2222,13 @@ async def admin_refund_wager(wager_id: str, http_request: Request):
                 "error": str(e)
             })
 
-    # Update wager status
+    # Update wager status (always mark as refunded/cancelled even if 0 SOL)
     if total_refunded > 0:
         wager.status = "refunded"
-        db.save_wager(wager)
+    else:
+        # No funds to refund - mark as cancelled instead
+        wager.status = "cancelled"
+    db.save_wager(wager)
 
     logger.info(f"[REFUND] Admin {admin.email} refunded wager {wager_id}: {total_refunded:.6f} SOL total")
     logger.info(f"[REFUND] Results: {refund_results}")

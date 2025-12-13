@@ -914,7 +914,10 @@ async function cancelWager(wagerId) {
     try {
         const response = await fetch(`${API_BASE}/api/wager/cancel`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
             body: JSON.stringify({
                 wager_id: wagerId,
                 creator_wallet: currentUser.payout_wallet
